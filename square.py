@@ -4,7 +4,7 @@ import robot
 arlo = robot.Robot()
 
 SPEED  = 64   # 0..127  (safe, not too fast)
-TIME   = 0.2  # seconds ≈ 1 meter at speed ~64 (will tune)
+TIME   = 2.5  # seconds ≈ 1 meter at speed ~64 (will tune)
 TURN_TIME  = 0.9  # seconds ≈ 90° turn at speed ~64 (will tune)
 
 # ---- per-robot calibration (measure once, tweak here) ----
@@ -27,15 +27,15 @@ def go(speed, secs, xdir, ydir):
 
 
 try:
-    for i in range(10):
+    for i in range(4):
         # 1) drive 1 meter (approx)
         go(SPEED, TIME, 1, 1)
-        time.sleep(TIME)
+        time.sleep(0.2)
         arlo.stop()
         time.sleep(0.2)
 
         # 2) turn ~90° left (in place)
-        go(SPEED,TIME, 0, 1)
+        go(SPEED,TURN_TIME, 0, 1)
         time.sleep(TURN_TIME)
         arlo.stop()
         time.sleep(0.2)
