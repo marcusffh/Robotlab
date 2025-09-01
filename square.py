@@ -8,7 +8,7 @@ TIME   = 2.5  # seconds ≈ 1 meter at speed ~64 (will tune)
 TURN_TIME  = 0.9  # seconds ≈ 90° turn at speed ~64 (will tune)
 
 # ---- per-robot calibration (measure once, tweak here) ----
-CAL_KL = 0.970   # left wheel scale
+CAL_KL = 0.980   # left wheel scale
 CAL_KR = 1.000   # right wheel scale (e.g., 0.985 means right is a bit “strong”)
 MIN_PWR = 40     # per robot.py: avoid <40 except 0; valid 30..127, recommended ≥40
 MAX_PWR = 127
@@ -30,15 +30,10 @@ try:
     for i in range(10):
         # 1) drive 1 meter (approx)
         go(SPEED, TIME, 1, 1)
-        time.sleep(0.2)
-        arlo.stop()
-        time.sleep(0.2)
 
         # 2) turn ~90° left (in place)
         go(SPEED,TURN_TIME, 0, 1)
-        time.sleep(TURN_TIME)
-        arlo.stop()
-        time.sleep(0.2)
+
 
 finally:
     arlo.stop()
