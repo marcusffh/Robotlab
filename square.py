@@ -27,7 +27,7 @@ def go(speed, secs, xdir, ydir):
 
 
 try:
-    for i in range(4):
+    for i in range(10):
         # 1) drive 1 meter (approx)
         go(SPEED, TIME, 1, 1)
         time.sleep(0.2)
