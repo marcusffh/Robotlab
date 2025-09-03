@@ -4,7 +4,7 @@ import robot
 arlo = robot.Robot()
 
 TRANSLATION_TIME = 2.7  
-TURN_TIME  = 0.825 
+TURN_TIME  = 0.83 
 
 CAL_KL = 0.980  
 CAL_KR = 1.000   
