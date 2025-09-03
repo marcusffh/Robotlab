@@ -31,7 +31,7 @@ for _ in range(1):  # figure-8 loops
     # curve left
     continous_drive(6.5, speed - 30, speed + 30, FORWARD, FORWARD)
     # curve right
-    continous_drive(6.3, speed + 30, speed - 25, FORWARD, FORWARD)
+    continous_drive(6.4, speed + 30, speed - 20, FORWARD, FORWARD)
 
     arlo.stop()
     time.sleep(0.2) 
