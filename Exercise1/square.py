@@ -8,9 +8,11 @@ def drive_in_square(times=1, meters=1, speed=None):
     for _ in range(times):
         for _ in range(4):
             #Drive forwards   
-            calArlo.drive_distance(meters, speed)
+            calArlo.drive_distance(meters, speed = speed)
+            calArlo.stop()
             #Turn 90 degrees   
-            calArlo.turn_angle(90, speed)   
+            calArlo.turn_angle(90, speed = speed)  
+            calArlo.stop() 
             
 try:
     drive_in_square(3) 

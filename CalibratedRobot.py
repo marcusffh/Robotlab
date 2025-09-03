@@ -22,15 +22,10 @@ class CalibratedRobot:
     def clamp_power(self, p):
         return max(self.MIN_PWR, min(self.MAX_PWR, int(round(p))))
 
-    def drive(self, speed, duration, leftDir, rightDir):
-        l = self.clamp_power(speed * self.CAL_KL) if speed > 0 else 0
-        r = self.clamp_power(speed * self.CAL_KR) if speed > 0 else 0
+    def drive(self, leftSpeed, rightSpeed, duration, leftDir, rightDir):
+        l = self.clamp_power(leftSpeed * self.CAL_KL) if leftSpeed > 0 else 0
+        r = self.clamp_power(rightSpeed * self.CAL_KR) if rightSpeed > 0 else 0
         self.arlo.go_diff(l, r, leftDir, rightDir)
-        start = time.perf_counter()
-        elapsed = 0
-        while elapsed < duration:
-            elapsed = time.perf_counter() - start
-        self.arlo.stop()
 
     def drive_distance(self, meters, direction=None, speed=None,):
         """Drive a certain amount of meters at a given speed."""
@@ -40,7 +35,9 @@ class CalibratedRobot:
             direction = self.FORWARD
         #The formula for the duration to drive the desired meters: duration = TRANSLATION_TIME * meters​ * (default speed /current speed​)
         duration = self.TRANSLATION_TIME * meters * (self.default_speed / speed)
-        self.drive(speed, duration, direction, direction)
+        self.drive(speed, speed, duration, direction, direction)
+        
+
 
     def turn_angle(self, angleDeg, speed=None):
         """Turn a given angle in degrees at a given speed. Positive = left, negative = right."""
@@ -49,9 +46,9 @@ class CalibratedRobot:
         #The formula for the duration to turn the desired angle: duration = TURN_TIME *  (abs(angle) / 90.0) * (default_speed /current speed)
         duration = self.TURN_TIME * (abs(angleDeg) / 90.0) * (self.default_speed / speed)
         if angleDeg > 0:
-            self.drive(speed, duration, self.BACKWARD, self.FORWARD)  # left
+            self.drive(speed, speed, duration, self.BACKWARD, self.FORWARD)  # left
         else:
-            self.drive(speed, duration, self.FORWARD, self.BACKWARD)  # right
+            self.drive(speed, speed, duration, self.FORWARD, self.BACKWARD)  # right
             
     def stop(self):
         self.arlo.stop()
