@@ -21,6 +21,6 @@ def continous_drive(duration, leftSpeed, rightSpeed, leftDir, rightDir):
 
 for _ in range(3):  # 3 figure-8 loops
     # curve left
-    continous_drive(2, speed - 10, speed + 10, FORWARD, FORWARD)
+    continous_drive(4, speed - 20, speed + 20, FORWARD, FORWARD)
     # curve right
-    continous_drive(2, speed + 10, speed - 10, FORWARD, FORWARD)
+    continous_drive(4, speed + 20, speed - 20, FORWARD, FORWARD)
