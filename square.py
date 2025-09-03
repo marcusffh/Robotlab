@@ -3,10 +3,8 @@ import robot
 
 arlo = robot.Robot()
 
-#Translation time for the robot to drive 1 meter at speed 64
 TRANSLATION_TIME = 2.5  
-#Time it takes for the robot to rotate 90 degrees at speed 64
-TURN_TIME  = 0.89  
+TURN_TIME  = 0.91  
 
 CAL_KL = 0.980  
 CAL_KR = 1.000   
@@ -38,7 +36,7 @@ def drive_in_square(times=1):
             drive(speed, TURN_TIME, BACKWARD, FORWARD)    
             
 try:
-   drive(speed, TRANSLATION_TIME, FORWARD, FORWARD)
+    drive_in_square(1) 
 finally:
     arlo.stop() 
             
