@@ -4,20 +4,22 @@ import CalibratedRobot
 # Initialize robot
 calArlo = CalibratedRobot.CalibratedRobot()
 
-SAFE_DISTANCE = 200  # mm
-speed = 64   # calibrated default speed
+SAFE_DISTANCE = 200 
+speed = 64
+duration =10  
 
 
-def drive_with_obstacle_avoidance(calArlo, speed=speed, min_dist=SAFE_DISTANCE):
+def drive_with_obstacle_avoidance(calArlo, duration, speed=speed, min_dist=SAFE_DISTANCE):
     """
     Drive continuously while checking front sensors.
     Stops and steers around obstacles when too close.
     """
     # Start continuous forward motion using calibrated power
     calArlo.drive(speed, speed, calArlo.FORWARD, calArlo.FORWARD)
-
-    while True:
-         # Read front sensors
+    start = time.perf_counter()
+    elapsed = 0
+    while elapsed < duration:
+        elapsed = time.perf_counter() - start
         left = calArlo.arlo.read_left_ping_sensor()
         center = calArlo.arlo.read_front_ping_sensor()
         right = calArlo.arlo.read_right_ping_sensor()
@@ -32,11 +34,10 @@ def drive_with_obstacle_avoidance(calArlo, speed=speed, min_dist=SAFE_DISTANCE):
             else:
                 calArlo.turn_angle(-45)  # turn right
 
-            calArlo.arlo.go_diff(l_power, r_power, calArlo.FORWARD, calArlo.FORWARD)
+            calArlo.drive(speed, speed, calArlo.FORWARD, calArlo.FORWARD)
 
         time.sleep(0.05)
-        
-try:
-    drive_with_obstacle_avoidance(calArlo)
-finally:
     calArlo.stop()
+    
+drive_with_obstacle_avoidance(calArlo, duration)
+
