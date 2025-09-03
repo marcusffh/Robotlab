@@ -36,7 +36,7 @@ def drive_in_square(times=1):
             drive(speed, TURN_TIME, BACKWARD, FORWARD)    
             
 try:
-    drive_in_square(1) 
+    drive_in_square(3) 
 finally:
     arlo.stop() 
             
