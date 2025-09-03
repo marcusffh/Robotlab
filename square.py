@@ -3,7 +3,9 @@ import robot
 
 arlo = robot.Robot()
 
+#Translation time for the robot to drive 1 meter at speed 64
 TRANSLATION_TIME = 2.5  
+#Time it takes for the robot to rotate 90 degrees at speed 64
 TURN_TIME  = 0.89  
 
 CAL_KL = 0.980  

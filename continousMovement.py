@@ -8,7 +8,7 @@ BACKWARD = 0
 
 speed = 64
 
-
+#Uses non-blocking method
 def continous_drive(duration, leftSpeed, rightSpeed, leftDir, rightDir):
     arlo.go_diff(leftSpeed, rightSpeed, leftDir, rightDir)
     start = time.perf_counter()
