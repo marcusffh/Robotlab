@@ -25,12 +25,13 @@ def continous_drive(duration, leftSpeed, rightSpeed, leftDir, rightDir):
     elapsed = 0
     while elapsed < duration:
         elapsed = time.perf_counter() - start
-        
-    arlo.stop()
-    time.sleep(0.2)  
+         
 
 for _ in range(1):  # figure-8 loops
     # curve left
     continous_drive(6.5, speed - 30, speed + 30, FORWARD, FORWARD)
     # curve right
-    continous_drive(6.3, speed + 30, speed - 30, FORWARD, FORWARD)
+    continous_drive(6.3, speed + 30, speed - 25, FORWARD, FORWARD)
+
+    arlo.stop()
+    time.sleep(0.2) 
