@@ -1,33 +1,14 @@
 100 mm (10cm):
 
-Sample 1: 101 mm
-Sample 2: 101 mm
-Sample 3: 101 mm
-Sample 4: 101 mm
-Sample 5: 100 mm
+Sample 1: 108 mm
+Sample 2: 107 mm
+Sample 3: 107 mm
+Sample 4: 107 mm
+Sample 5: 108 mm
 
-Sample 1: 98 mm
-Sample 2: 100 mm
-Sample 3: 99 mm
-Sample 4: 99 mm
-Sample 5: 100 mm
 
-Sample 1: 100 mm
-Sample 2: 102 mm
-Sample 3: 101 mm
-Sample 4: 100 mm
-Sample 5: 98 mm
 
-Sample 1: 97 mm
-Sample 2: 97 mm
-Sample 3: 96 mm
-Sample 4: 97 mm
-Sample 5: 97 mm
 
-Sample 1: 90 mm
-Sample 2: 93 mm
-Sample 3: 89 mm
-Sample 4: 95 mm
-Sample 5: 100 mm
+
 
 

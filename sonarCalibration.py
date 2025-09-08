@@ -18,7 +18,6 @@ def measure_distance(actual_distance, samples=5):
         readings.append(val)
         time.sleep(0.2)
 
-    print(f"Saved {samples} readings at {actual_distance} mm")
 
 def analyze_measurements(filename=FILENAME):
     """Compute standard deviation of error vs distance, and plot measured vs actual."""
