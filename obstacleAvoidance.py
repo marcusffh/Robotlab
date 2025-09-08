@@ -32,9 +32,9 @@ def drive_with_obstacle_avoidance(calArlo, duration, speed=speed, min_dist=SAFE_
 
             # Decide turn direction based on which side is freer
             if left > right:
-                calArlo.turn_angle(10)   # turn left
+                calArlo.turn_angle(5)   # turn left
             else:
-                calArlo.turn_angle(-10)  # turn right
+                calArlo.turn_angle(-5)  # turn right
 
         calArlo.drive(speed, speed, calArlo.FORWARD, calArlo.FORWARD)
 
