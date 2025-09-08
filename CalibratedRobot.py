@@ -6,7 +6,7 @@ class CalibratedRobot:
         self.arlo = robot.Robot()
 
         self.TRANSLATION_TIME = 2.5 # time to drive 1 meter at default speed (64)
-        self.TURN_TIME = 0.78 # time to turn 90 degrees at default speed (64)
+        self.TURN_TIME = 0.8 # time to turn 90 degrees at default speed (64)
         
         #ratio for adjusting the wheels to have the same power
         self.CAL_KL = 0.98
