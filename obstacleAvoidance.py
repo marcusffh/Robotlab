@@ -4,7 +4,7 @@ import CalibratedRobot
 # Initialize robot
 calArlo = CalibratedRobot.CalibratedRobot()
 
-SAFE_DISTANCE = 150 
+SAFE_DISTANCE = 200 
 speed = 64
 duration =20  
 
