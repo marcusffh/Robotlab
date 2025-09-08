@@ -62,5 +62,5 @@ def analyze_measurements(filename=FILENAME):
     plt.grid(True)
     plt.show()
 
-measure_distance(500, samples=5)
+measure_distance(100, samples=5)
 
