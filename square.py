@@ -13,7 +13,7 @@ def drive_in_square(times=1, meters=1, speed=None):
             calArlo.turn_angle(90, speed = speed)  
             
 try:
-    drive_in_square(3) 
+    drive_in_square(1) 
 finally:
     calArlo.stop() 
             
