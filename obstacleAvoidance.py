@@ -23,8 +23,10 @@ def drive_with_obstacle_avoidance(calArlo, duration, speed=speed, min_dist=SAFE_
         left = calArlo.arlo.read_left_ping_sensor()
         center = calArlo.arlo.read_front_ping_sensor()
         right = calArlo.arlo.read_right_ping_sensor()
-
-        if left < min_dist or center < min_dist or right < min_dist:
+        while left < min_dist or center < min_dist or right < min_dist:
+            left = calArlo.arlo.read_left_ping_sensor()
+            center = calArlo.arlo.read_front_ping_sensor()
+            right = calArlo.arlo.read_right_ping_sensor()
             print("Obstacle detected! Stopping and avoiding...")
             calArlo.arlo.stop()
 
@@ -34,7 +36,7 @@ def drive_with_obstacle_avoidance(calArlo, duration, speed=speed, min_dist=SAFE_
             else:
                 calArlo.turn_angle(-10)  # turn right
 
-            calArlo.drive(speed, speed, calArlo.FORWARD, calArlo.FORWARD)
+        calArlo.drive(speed, speed, calArlo.FORWARD, calArlo.FORWARD)
 
         time.sleep(0.05)
     calArlo.stop()
