@@ -9,7 +9,7 @@ import CalibratedRobot
 calArlo = CalibratedRobot.CalibratedRobot()
 FILENAME = "sonar_measurements.csv"
 
-def measure_distance(actual_distance, samples=5, filename=FILENAME):
+def measure_distance(actual_distance, samples=5):
     """Take multiple sonar readings at a known distance and save to CSV."""
     readings = []
     for i in range(samples):
@@ -17,15 +17,6 @@ def measure_distance(actual_distance, samples=5, filename=FILENAME):
         print(f"Sample {i+1}: {val} mm")
         readings.append(val)
         time.sleep(0.2)
-
-    # Append to file
-    file_exists = os.path.isfile(filename)
-    with open(filename, "a", newline="") as f:
-        writer = csv.writer(f)
-        if not file_exists:
-            writer.writerow(["actual_distance", "measured"])
-        for r in readings:
-            writer.writerow([actual_distance, r])
 
     print(f"Saved {samples} readings at {actual_distance} mm")
 
@@ -62,5 +53,5 @@ def analyze_measurements(filename=FILENAME):
     plt.grid(True)
     plt.show()
 
-measure_distance(500, samples=5)
+measure_distance(100, samples=5)
 
