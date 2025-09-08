@@ -1,0 +1,66 @@
+import time
+import csv
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import CalibratedRobot
+
+calArlo = CalibratedRobot.CalibratedRobot()
+FILENAME = "sonar_measurements.csv"
+
+def measure_distance(actual_distance, samples=5, filename=FILENAME):
+    """Take multiple sonar readings at a known distance and save to CSV."""
+    readings = []
+    for i in range(samples):
+        val = calArlo.arlo.read_front_ping_sensor()
+        print(f"Sample {i+1}: {val} mm")
+        readings.append(val)
+        time.sleep(0.2)
+
+    # Append to file
+    file_exists = os.path.isfile(filename)
+    with open(filename, "a", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(["actual_distance", "measured"])
+        for r in readings:
+            writer.writerow([actual_distance, r])
+
+    print(f"Saved {samples} readings at {actual_distance} mm")
+
+def analyze_measurements(filename=FILENAME):
+    """Compute standard deviation of error vs distance, and plot measured vs actual."""
+    df = pd.read_csv(filename)
+    df["error"] = df["measured"] - df["actual_distance"]
+
+    grouped = df.groupby("actual_distance").agg(
+        mean_measured=("measured", "mean"),
+        std_error=("error", "std")
+    ).reset_index()
+
+    print("\n Measurement Summary:")
+    print(grouped)
+
+    # Plot measured vs actual
+    plt.figure(figsize=(7,5))
+    plt.scatter(df["actual_distance"], df["measured"], alpha=0.6, label="Measurements")
+    plt.plot(df["actual_distance"], df["actual_distance"], "r--", label="Ideal Linear")
+    plt.xlabel("Actual Distance (mm)")
+    plt.ylabel("Measured Distance (mm)")
+    plt.title("Sonar Measurements vs Actual Distance")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    # Plot std of error as a function of distance
+    plt.figure(figsize=(7,5))
+    plt.plot(grouped["actual_distance"], grouped["std_error"], marker="o")
+    plt.xlabel("Actual Distance (mm)")
+    plt.ylabel("Measured Distance (mm)")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+measure_distance(500, samples=5)
+
