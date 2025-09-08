@@ -1,5 +1,4 @@
 100 mm (10cm):
-
 Sample 1: 108 mm
 Sample 2: 107 mm
 Sample 3: 107 mm
@@ -7,8 +6,33 @@ Sample 4: 107 mm
 Sample 5: 108 mm
 
 
+500 mm (50cm):
+Sample 1: 511 mm
+Sample 2: 508 mm
+Sample 3: 507 mm
+Sample 4: 507 mm
+Sample 5: 507 mm
 
+1000mm (100cm):
+Sample 1: 997 mm
+Sample 2: 998 mm
+Sample 3: 998 mm
+Sample 4: 999 mm
+Sample 5: 999 mm
 
+2000mm (200cm):
+Sample 1: 2000 mm
+Sample 2: 2000 mm
+Sample 3: 2001 mm
+Sample 4: 2001 mm
+Sample 5: 2001 mm
+
+3000mm (300cm):
+Sample 1: 2982 mm
+Sample 2: 2982 mm
+Sample 3: 2982 mm
+Sample 4: 2982 mm
+Sample 5: 2982 mm
 
 
 
