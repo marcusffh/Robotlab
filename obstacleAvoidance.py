@@ -6,7 +6,7 @@ calArlo = CalibratedRobot.CalibratedRobot()
 
 SAFE_DISTANCE = 200 
 speed = 64
-duration =20  
+duration =15  
 
 
 def drive_with_obstacle_avoidance(calArlo, duration, speed=speed, min_dist=SAFE_DISTANCE):
