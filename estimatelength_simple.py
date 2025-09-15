@@ -118,7 +118,7 @@ def main():
                     print("  [ERR] Camera read failed; retrying…"); continue
                 x_px, mid = detect_aruco_vertical_px(frame, restrict_id=args.id)
 
-            f_px = x_px * (Z / args.marker_mm)
+            f_px = (x_px * Z) / args.marker_mm
             rows.append((Z, x_px, f_px, mid))
             print(f"  OK: x={x_px:.2f} px  ->  f={f_px:.2f} px  (ID={mid})")
 
