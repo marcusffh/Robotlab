@@ -2,7 +2,7 @@
 import cv2, csv, numpy as np, pathlib
 from aruco_utils import detect_markers, largest_marker_index, side_len_pixels
 
-def open_cam(index=0, width=1280, height=720):
+def open_cam(index=0, width=1920, height=1080):
     cap = cv2.VideoCapture(index)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
