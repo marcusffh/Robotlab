@@ -7,12 +7,12 @@ def open_cam(index=0, width=1280, height=720):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     if not cap.isOpened():
-        raise RuntimeError("Could not open webcam. Try a different index (e.g., 1) or check permissions.")
+        raise RuntimeError("Could not open webcam")
     return cap
 
 def main():
-    print("=== Focal-length estimation (webcam) ===")
-    X_mm = float(input("Enter marker side length X in mm (e.g., 70): ").strip())
+    print("=== Focal-length estimation ===")
+    X_mm = float(input("Enter marker side length X in mm: ").strip())
     out = pathlib.Path("f_measurements_webcam.csv")
     rows = [("Z_mm", "x_px", "f_px")]
 
@@ -29,18 +29,18 @@ def main():
         try:
             Z_mm = float(Z_s)
         except ValueError:
-            print("  Not a number—try again.")
+            print("  Not a number")
             continue
 
         # Grab a frame
         ok, frame = cap.read()
         if not ok:
-            print("  Failed to read frame. Try again.")
+            print("  Failed to read frame")
             continue
 
         corners, ids = detect_markers(frame)
         if ids is None:
-            print("  No ArUco marker found. Make sure it's visible and try again.")
+            print("  No ArUco marker found")
             # show the live frame to help user adjust
             cv2.imshow("Adjust marker (press any key to continue)", frame)
             cv2.waitKey(0)
