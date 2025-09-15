@@ -1,6 +1,6 @@
 import time
 import robot
-import CalibratedRobot
+import Exercise1.CalibratedRobot as CalibratedRobot
 
 calArlo = CalibratedRobot.CalibratedRobot()
     

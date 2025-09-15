@@ -1,5 +1,5 @@
 import time
-import CalibratedRobot
+import Exercise1.CalibratedRobot as CalibratedRobot
 
 # Initialize robot
 calArlo = CalibratedRobot.CalibratedRobot()
