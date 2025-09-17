@@ -36,7 +36,7 @@ PARAMS = aruco.DetectorParameters_create()  # :contentReference[oaicite:4]{index
 # Robot (we ONLY use existing methods)
 bot = CalibratedRobot()
 
-def scan_once():
+def scan_landmarks():
     """Capture one frame, detect all markers, return list of (id, x, z, dist)."""
     camera.capture(raw, format="bgr", use_video_port=True)
     frame = raw.array
@@ -46,31 +46,32 @@ def scan_once():
     corners, ids, _ = aruco.detectMarkers(gray, DICT, parameters=PARAMS)  # :contentReference[oaicite:5]{index=5}
 
     results = []
-    if ids is not None and len(ids) > 0:
-        rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(
-            corners, MARKER_LEN_M, K, dist
-        )  # returns tvecs in camera coords (meters) :contentReference[oaicite:6]{index=6}
+    while True:
+        if ids is not None and len(ids) > 0:
+            rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(
+                corners, MARKER_LEN_M, K, dist
+            )  # returns tvecs in camera coords (meters) :contentReference[oaicite:6]{index=6}
 
-        for i in range(len(ids)):
-            t = tvecs[i, 0, :]                # (tx, ty, tz)
-            x, z = float(t[0]), float(t[2])   # 2D map in camera frame
-            d = float(np.linalg.norm(t))      # optional full distance
-            results.append((int(ids[i][0]), x, z, d))
-    return sorted(results, key=lambda r: r[3])  # nearest first
+            for i in range(len(ids)):
+                t = tvecs[i, 0, :]                # (tx, ty, tz)
+                x, z = float(t[0]), float(t[2])   # 2D map in camera frame
+                d = float(np.linalg.norm(t))      # optional full distance
+                results.append((int(ids[i][0]), x, z, d))
+        else:
+            print("Searching for marker...")
+            bot.drive(50, 50, bot.BACKWARD, bot.FORWARD)
+            time.sleep(0.2)
+            bot.stop()
+        return sorted(results, key=lambda r: r[3])  # nearest first
 
 try:
-    headings = [-60, -30, 0, 30, 60]   # small loop of turns (deg)
-    for a in headings:
-        if a != 0:
-            bot.turn_angle(a)          # existing API: relative turn
-
-        pts = scan_once()
-        print(f"\nHeading {a:+} deg — landmarks (id, x[m], z[m], dist[m]):")
-        if not pts:
-            print("  (none)")
-        else:
-            for rec in pts:
-                print(f"  {rec}")
+    pts = scan_once()
+    print(f"\n - landmarks (id, x[m], z[m], dist[m]):")
+    if not pts:
+        print(" (none)")
+    else:
+        for rec in pts:
+            print(f"  {rec}")
 
     bot.stop()
 
