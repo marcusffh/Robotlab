@@ -25,7 +25,7 @@ def make_camera(width=1640, height=1232, fps=30):
     Frames are returned as BGR numpy arrays suitable for OpenCV.
     """
     try:
-        from picamera import PiCamera
+        from Picamera2 import PiCamera2
         from picamera.array import PiRGBArray
     except ImportError as e:
         raise RuntimeError(
@@ -33,7 +33,7 @@ def make_camera(width=1640, height=1232, fps=30):
             "Install it (sudo apt install python3-picamera) and enable the legacy camera stack."
         ) from e
 
-    cam = PiCamera()
+    cam = PiCamera2()
     cam.resolution = (width, height)
     cam.framerate = fps
     # Let the sensor warm up for more stable exposure/white balance
