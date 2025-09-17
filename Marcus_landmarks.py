@@ -25,9 +25,10 @@ def drive_to_landmark():
         corners, ids = aruco.detect_markers(frame)
         if ids is not None:
             print(f"id found: {ids}")
-            rvec, tvec = aruco.estimate_pose(corners, cam.camera_matrix)
+            rvecs, tvecs = aruco.estimate_pose(corners, cam.camera_matrix)
+            tvec = tvecs[0][0]
             
-            dist = aruco.compute_distance_to_marker(tvec) - STOP_BUFFER
+            dist = aruco.compute_distance_to_marker(tvec)
             angle = aruco.compute_rotation_to_marker(tvec)
             
             calArlo.turn_angle(angle)
@@ -48,11 +49,3 @@ def drive_to_landmark():
             calArlo.stop()
             
 drive_to_landmark()
-
-            
-            
-        
-        
-
-
-
