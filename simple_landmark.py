@@ -28,6 +28,33 @@ def clamp_power(p):
     if p <= 0: return 0
     return max(MIN_PWR, min(MAX_PWR, int(round(p))))
 
+# ==== SEARCH duty-cycle (rotate -> still -> capture) ====
+SPIN_PERIOD_MS  = 350         # total period
+SPIN_DUTY       = 0.22        # fraction of period rotating
+SNAP_GUARD_MS   = 50          # extra still time to ensure next frame is sharp
+
+_spin = {"on": False, "t0": 0.0}
+def spin_pwm_step(arlo, power, period_ms=SPIN_PERIOD_MS, duty=SPIN_DUTY):
+    """Toggle spin / stop based on a software PWM to give long still windows."""
+    now = time.time()
+    if _spin["t0"] == 0.0:
+        _spin["t0"] = now; _spin["on"] = False
+    elapsed = (now - _spin["t0"]) * 1000.0
+    on_ms   = duty * period_ms
+    off_ms  = (1.0 - duty) * period_ms
+    if _spin["on"]:
+        if elapsed >= on_ms:
+            arlo.stop()
+            _spin["on"] = False
+            _spin["t0"] = now
+    else:
+        if elapsed >= off_ms:
+            # spin in place (choose a side; left here)
+            L = clamp_power(power); R = clamp_power(power)
+            arlo.go_diff(L, R, 0, 1)  # left spin
+            _spin["on"] = True
+            _spin["t0"] = now
+
 # ==== Camera ====
 def make_camera(width=IMG_W, height=IMG_H, fps=FPS):
     try:
@@ -63,8 +90,12 @@ def make_camera(width=IMG_W, height=IMG_H, fps=FPS):
 # ==== Detection ====
 def detect_marker(frame_bgr, restrict_id=None):
     aruco = cv2.aruco
-    dictionary = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
+    dictionary = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)  # 6x6 per your print
     params     = aruco.DetectorParameters_create()
+    # (Optional: uncomment for a bit more range on tiny tags)
+    # params.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+    # params.adaptiveThreshWinSizeMin, params.adaptiveThreshWinSizeMax, params.adaptiveThreshWinSizeStep = 5, 31, 4
+
     corners, ids, _ = aruco.detectMarkers(frame_bgr, dictionary, parameters=params)
     if ids is None or len(corners) == 0: return None
     best=None
@@ -78,7 +109,7 @@ def detect_marker(frame_bgr, restrict_id=None):
     _, mid, pts = best
     TL, TR, BR, BL = pts
     v1 = np.linalg.norm(TL - BL); v2 = np.linalg.norm(TR - BR)
-    x_px = 0.5*(v1+v2)  # size proxy
+    x_px = 0.5*(v1+v2)
     cx   = float((TL[0]+TR[0]+BR[0]+BL[0]) / 4.0)
     h, w = frame_bgr.shape[:2]
     return {"id": mid, "x_px": float(x_px), "cx": cx, "w": w}
@@ -97,49 +128,46 @@ lost_frames = 0
 err_filt = 0.0
 
 try:
-    # start stopped; we only rotate in SEARCH
-    arlo.stop()
+    arlo.stop()  # start stationary
 
     while True:
+        # ----- SEARCH: duty-cycled spin for long still windows -----
+        if state == SEARCH:
+            spin_pwm_step(arlo, TURN_PWR)  # rotate during the ON part…
+            if not _spin["on"]:
+                # …and we are in the OFF (still) part now -> give a small guard so the next frame is sharp
+                time.sleep(SNAP_GUARD_MS/1000.0)
+
         ok, frame = read()
         if not ok:
-            if state == SEARCH:
-                arlo.go_diff(TURN_PWR, TURN_PWR, 0, 1)  # keep spinning
             continue
 
         det = detect_marker(frame, restrict_id=TARGET_ID)
 
         if state == SEARCH:
-            # rotate in place until we see REQUIRED_HITS in a row
             if det is None:
                 hits = 0
-                arlo.go_diff(TURN_PWR, TURN_PWR, 0, 1)  # rotate left on center
                 continue
             hits += 1
             if hits < REQUIRED_HITS:
-                arlo.go_diff(TURN_PWR, TURN_PWR, 0, 1)  # confirm with another frame
                 continue
-            # lock: stop rotation, switch to DRIVE
+            # lock on → switch to DRIVE (DRIVE logic unchanged)
             arlo.stop()
             state = DRIVE
             lost_frames = 0
             err_filt = 0.0
-            # immediately start rolling forward
             arlo.go_diff(BASE_PWR, BASE_PWR, 1, 1)
             continue
 
-        # ---- DRIVE state ----
+        # ---- DRIVE state (UNCHANGED) ----
         if det is None:
             lost_frames += 1
             if lost_frames > LOST_TO_SEARCH:
-                # fully lost: stop & re-enter SEARCH
                 arlo.stop()
                 state = SEARCH
                 hits = 0
-            # otherwise: keep last command (coast) for a bit
             continue
 
-        # we have a detection
         lost_frames = 0
 
         # horizontal error

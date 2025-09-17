@@ -57,7 +57,7 @@ parameters = aruco.DetectorParameters_create()
 def search_and_drive():
     marker_size = 140   # mm
     driving = False
-    STOP_BUFFER = 0.1
+    STOP_BUFFER = 0.2
 
     while True:
         ret, frame = read_fn()
