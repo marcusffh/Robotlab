@@ -55,8 +55,7 @@ parameters = aruco.DetectorParameters_create()
 
 # ================= SEARCH + DRIVE =================
 def search_and_drive():
-    marker_size = 140      # mm
-    STOP_BUFFER = 0.3      # meters
+    marker_size = 140   # mm
     driving = False
 
     while True:
@@ -68,46 +67,36 @@ def search_and_drive():
         corners, ids, _ = aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
 
         if ids is not None and len(ids) > 0:
-            # Estimate pose
+            # Pose estimation
             rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(
                 corners, marker_size, camera_matrix, dist_coeffs
             )
-            rvec = rvecs[0]
-            tvec = tvecs[0][0]   # marker translation vector
+            tvec = tvecs[0][0]
 
-            # Compute forward vector to marker in camera frame
-            v = tvec / np.linalg.norm(tvec)      # unit vector to marker
-            beta = np.arccos(np.clip(np.dot(v, [0,0,1]), -1.0, 1.0))  # angle to forward axis
-            beta_deg = np.degrees(beta)
-
-            # Determine sign: left or right
-            if tvec[0] < 0:
-                beta_deg = -beta_deg
-
-            # Distance to marker (standoff)
-            distance = max(np.linalg.norm(tvec)/1000.0 - STOP_BUFFER, 0)
+            # Compute angle and distance
+            angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))  # flip sign if needed
+            dist = tvec[2]/1000 
+            dist = max(dist, 0)  # avoid negative distance
 
             print(f"Detected marker IDs: {ids.flatten()}")
-            print(f"tvec: {tvec}, angle: {beta_deg:.2f}°, distance: {distance:.2f} m")
+            print(f"tvec: {tvec}, angle: {angle:.2f}°, distance: {dist:.2f} m")
 
-            # Turn once toward marker
-            calArlo.turn_angle(beta_deg)
-
-            # Drive toward marker only if distance > 0
-            if distance > 0 and not driving:
-                calArlo.drive_distance(distance)
+            # Turn and move
+            calArlo.turn_angle(angle)
+            if dist > 0 and not driving:
                 driving = True
+                calArlo.drive_distance(dist)
 
-            if distance <= 0:
-                print("Reached marker!")
+            if dist <= 0:
+                print("Reached landmark!")
                 calArlo.stop()
+                driving = False
                 break
         else:
             print("Searching for marker...")
-            calArlo.drive(25, 25, calArlo.BACKWARD, calArlo.FORWARD)
+            calArlo.drive(50, 50, calArlo.BACKWARD, calArlo.FORWARD)
             time.sleep(0.2)
             calArlo.stop()
-            driving = False
 
 try:
     search_and_drive()
