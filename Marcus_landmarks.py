@@ -5,7 +5,7 @@ import robot
 
 # ==== Config ====
 IMG_W, IMG_H, FPS = 960, 720, 30
-F_PX, MARKER_MM = 1275.0, 140.0
+Focal_length, MARKER_MM = 1275.0, 140.0
 TARGET_ID = None
 
 STOP_AT_MM, CENTER_DEADBAND_PX = 420.0, 28
@@ -30,12 +30,12 @@ def spin_pwm_step(arlo, power, period_ms=350, duty=0.22):
             arlo.go_diff(clamp_power(power), clamp_power(power), 0, 1)  # spin left
             _spin.update(on=True, t0=now)
 
-def estimate_Z_mm(x_px, f_px=F_PX, X_mm=MARKER_MM):
+def estimate_Z_mm(x_px, f_px=Focal_length, X_mm=MARKER_MM):
     return (f_px * X_mm) / max(x_px, 1e-6)
 
 # ==== Init ====
 arlo = robot.Robot()
-cam = CameraUtils(width=IMG_W, height=IMG_H, fx=F_PX, fy=F_PX)
+cam = CameraUtils(width=IMG_W, height=IMG_H, fx=Focal_length, fy=Focal_length)
 cam.start_camera(width=IMG_W, height=IMG_H, fps=FPS)
 aruco = ArucoUtils(marker_length=MARKER_MM/1000.0)
 
