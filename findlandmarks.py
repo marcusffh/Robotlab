@@ -11,7 +11,7 @@ import time
 import numpy as np
 import cv2
 
-from exercise1.CalibratedRobot import CalibratedRobot  # ensure exercise1/__init__.py exists
+from Exercise1.CalibratedRobot import CalibratedRobot  # ensure exercise1/__init__.py exists
 from aruco_utils import ArucoUtils
 
 # ---- Camera / Marker (pixel-only; same idea as your working script) ----
