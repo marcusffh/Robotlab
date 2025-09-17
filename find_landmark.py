@@ -194,13 +194,7 @@ def spin_pwm_step(arlo, power, dir_sign, period_ms=SPIN_PERIOD_MS, duty=SPIN_DUT
         if elapsed >= off_ms:
             spin_continuous(arlo, power, dir_sign); _spin_state["on"] = True; _spin_state["t0"] = now
 
-# ===== Slew limiting (avoid jerky power jumps) =====
-def slew_toward(prev, target, max_step):
-    """Smoothly move prev toward target, clamping by max_step."""
-    delta = target - prev
-    if abs(delta) > max_step:
-        delta = max_step if delta > 0 else -max_step
-    return prev + delta
+
 
 # (Python identifiers can’t have spaces—rename properly.)
 def slew_toward(prev, target, max_step):
