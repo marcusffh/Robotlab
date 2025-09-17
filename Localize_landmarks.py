@@ -11,8 +11,8 @@ calArlo = CalibratedRobot()
 
 # Camera parameters (replace fx, fy, cx, cy with your calibration results)
 focal_length = 1275  # example from task 1
-camera_matrix = np.array([[focal_length, 0, 512],
-                          [0, focal_length, 384],
+camera_matrix = np.array([[focal_length, 0, 960/2],
+                          [0, focal_length, 720/2],
                           [0, 0, 1]], dtype=np.float32)
 dist_coeffs = np.zeros((5, 1))  # assume no distortion if not calibrated
 
