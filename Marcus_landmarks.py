@@ -56,7 +56,7 @@ def estimate_Z_mm(x_px, f_px=F_PX, X_mm=MARKER_MM):
 # ==== Init Robot + Camera + Aruco ====
 arlo = robot.Robot()
 cam = CameraUtils(width=IMG_W, height=IMG_H, fx=F_PX, fy=F_PX)
-cam.start_camera(FPS)
+cam.start_camera(width=IMG_W, height=IMG_H, fps=FPS)
 aruco = ArucoUtils(marker_length=MARKER_MM/1000.0)  # convert mm → m
 
 SEARCH, DRIVE = 0, 1
