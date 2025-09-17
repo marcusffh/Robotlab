@@ -72,24 +72,35 @@ def search_and_drive():
         corners, ids, _ = aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
 
         if ids is not None:
+            # Draw markers for visualization (optional)
+            aruco.drawDetectedMarkers(frame, corners, ids)
+
+            # Estimate pose
             rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(
-                corners, 100, camera_matrix, dist_coeffs)  # marker size = 100 mm
+                corners, 100, camera_matrix, dist_coeffs)  # marker size in mm
             tvec = tvecs[0][0]  # (x, y, z) in mm
 
-            print("Marker at:", tvec)
+            # Debug info
+            print(f"Marker detected! tvec: {tvec}")
 
-            # Angle + distance
+            # Compute angle and distance
             angle = np.degrees(np.arctan2(tvec[0], tvec[2]))
             dist = tvec[2] / 1000.0  # mm → meters
+            print(f"Angle to marker: {angle:.2f}, Distance: {dist:.2f} m")
 
+            # Turn toward the marker
             calArlo.turn_angle(angle)
-            calArlo.drive_distance(min(dist, 0.5))
 
+            # Drive forward (limit step size to avoid overshooting)
+            calArlo.drive_distance(min(dist, 0.3))
+
+            # Stop if close enough
             if dist < 0.2:
                 print("Reached landmark!")
                 break
         else:
-            calArlo.drive(50, 50, calArlo.BACKWARD, calArlo.FORWARD)
+            # Marker not found: move forward slowly with a slight curve
+            calArlo.drive(50, 60)  # left=50, right=60 for gentle search curve
             time.sleep(0.2)
             calArlo.stop()
 
@@ -97,6 +108,6 @@ def search_and_drive():
 try:
     search_and_drive()
 finally:
-    release_camera()
+    release_fn()
     calArlo.stop()
     cv2.destroyAllWindows()
