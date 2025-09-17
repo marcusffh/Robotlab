@@ -11,6 +11,14 @@ from picamera2 import Picamera2  # hard requirement
 
 # ---------- Small data holders ----------
 
+
+@dataclass
+class CameraConfig:
+    width: int = 1640
+    height: int = 1232
+    fps: int = 30
+
+
 @dataclass
 class Intrinsics:
     fx: float
