@@ -33,7 +33,7 @@ CAL_KL      = 0.98       # your tuned scales
 CAL_KR      = 1.00
 
 # ===== Behavior tuning =====
-SEARCH_PWR      = 44     # slow rotation power
+SEARCH_PWR      = 25     # slow rotation power
 SEARCH_DIR      = +1     # +1 spin right, -1 spin left
 
 TURN_PWR        = 50     # align pulse power
