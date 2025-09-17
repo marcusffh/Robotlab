@@ -20,11 +20,11 @@ import numpy as np
 import cv2
 
 from Exercise1.CalibratedRobot import CalibratedRobot
-from aruco_utils import ArucoUtils, CameraConfig, Intrinsics
+from aruco_utils import ArucoUtils, Intrinsics
 
 # ------------- Tuning -------------
 # Search behaviour
-SEARCH_STEP_DEG = 25.0          # rotate this much per search step
+SEARCH_STEP_DEG = 15.0          # rotate this much per search step
 SEARCH_SLEEP_S  = 0.1           # small settle time after each turn
 
 # Alignment (pose-based)
@@ -56,7 +56,12 @@ def main():
     marker_size_m = None  # e.g., 0.14 for 14 cm
 
     bot = CalibratedRobot()
-    aru = ArucoUtils(cam_cfg=CameraConfig(), intrinsics=intr, marker_size_m=marker_size_m)
+    aru = ArucoUtils(
+        intrinsics=intr,            # leave None if you’re in pixel mode
+        marker_size_m=marker_size_m,# leave None if you’re in pixel mode
+        res=(1640, 1232),           # pick what you want
+        fps=30
+        )
     aru.start_camera()
 
     state = "SEARCH"
@@ -111,7 +116,7 @@ def main():
                     if z > STOP_DIST_M:
                         remaining = max(0.0, z - STOP_DIST_M)
                         step = float(np.clip(remaining, STEP_FWD_MIN_M, STEP_FWD_M))
-                        ArucoUtils.go_forward_step(bot, step)
+                        ArucoUtils.forward_step(bot, step)
                         time.sleep(SEARCH_SLEEP_S)
                         continue
                     else:
@@ -130,7 +135,7 @@ def main():
 
                     # centered; step forward until the marker fills enough pixels
                     if det.side_px < STOP_SIDE_PX:
-                        ArucoUtils.go_forward_step(bot, STEP_FWD_M)
+                        ArucoUtils.forward_step(bot, STEP_FWD_M)
                         time.sleep(SEARCH_SLEEP_S)
                         continue
                     else:
