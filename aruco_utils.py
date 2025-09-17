@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# Picamera2-only ArUco utilities using BGR + DICT_6X6_250 (no grayscale).
-# Tuned for far detection (high resolution + permissive detector params).
+# Picamera2-only ArUco utilities (BGR, DICT_6X6_250) — mirrors your working detector.
 
 from __future__ import annotations
 from dataclasses import dataclass
@@ -17,35 +16,20 @@ class Intrinsics:
     fy: float
     cx: float
     cy: float
-    dist: np.ndarray  # kept for potential future pose mode
+    dist: np.ndarray  # kept for future pose mode (not used here)
 
 
 class ArucoUtils:
-    def __init__(self, res: Tuple[int, int] = (1640, 1232), fps: int = 30):
-        # High resolution -> more pixels on the tag at distance
+    def __init__(self, res: Tuple[int, int] = (960, 720), fps: int = 30):
+        # 960x720 main stream -> sensor runs 1640x1232 internally; ISP downsamples nicely
         self.res = res
         self.fps = fps
         self._picam2: Optional[Picamera2] = None
         self._started = False
 
+        # Exact dictionary + default params (like your working script)
         self._dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
-        self._params = self._make_params()
-
-    @staticmethod
-    def _make_params() -> cv2.aruco.DetectorParameters:
-        p = cv2.aruco.DetectorParameters_create()
-        # More permissive thresholds for small/far tags + stable corners
-        p.adaptiveThreshWinSizeMin = 5
-        p.adaptiveThreshWinSizeMax = 55
-        p.adaptiveThreshWinSizeStep = 5
-        p.adaptiveThreshConstant = 7
-        p.minMarkerPerimeterRate = 0.02
-        p.maxMarkerPerimeterRate = 4.0
-        p.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-        p.cornerRefinementWinSize = 5
-        p.cornerRefinementMaxIterations = 50
-        p.cornerRefinementMinAccuracy = 0.01
-        return p
+        self._params = cv2.aruco.DetectorParameters_create()
 
     # ---------- Camera (Picamera2 only) ----------
     def start_camera(self) -> None:
@@ -61,7 +45,7 @@ class ArucoUtils:
         )
         cam.configure(cfg)
         cam.start()
-        time.sleep(0.8)  # warm-up like your working script
+        time.sleep(0.8)  # same warm-up you used successfully
         self._picam2 = cam
         self._started = True
 
@@ -79,12 +63,12 @@ class ArucoUtils:
             self._picam2 = None
         self._started = False
 
-    # ---------- Detection (matches your working approach) ----------
+    # ---------- Detection (your working logic) ----------
     def detect_one(self, frame_bgr, restrict_id: Optional[int] = None):
         """
         Detect DICT_6X6_250 on BGR and return:
             { 'id': int, 'x_px': float, 'cx': float, 'w': int }
-        or None if not found. Chooses the largest by perimeter (stable).
+        or None if not found. Chooses the largest by perimeter.
         """
         aruco = cv2.aruco
         corners_list, ids, _ = aruco.detectMarkers(frame_bgr, self._dict, parameters=self._params)
@@ -113,12 +97,12 @@ class ArucoUtils:
         TL, TR, BR, BL = pts
         v1 = np.linalg.norm(TL - BL)
         v2 = np.linalg.norm(TR - BR)
-        x_px = 0.5 * (v1 + v2)  # vertical pixel height (mean of both sides)
-        cx = float((TL[0] + TR[0] + BR[0] + BL[0]) / 4.0)
+        x_px = 0.5 * (v1 + v2)  # vertical pixel height
+        cx   = float((TL[0] + TR[0] + BR[0] + BL[0]) / 4.0)
         h, w = frame_bgr.shape[:2]
         return {"id": mid, "x_px": float(x_px), "cx": cx, "w": w}
 
-    # ---------- Robot call-through helpers ----------
+    # ---------- Robot call-through (keep using your CalibratedRobot) ----------
     @staticmethod
     def rotate_step(bot, angle_deg: float, speed: Optional[int] = None) -> None:
         bot.turn_angle(angle_deg, speed=speed)
@@ -127,7 +111,7 @@ class ArucoUtils:
     def forward_step(bot, meters: float, speed: Optional[int] = None) -> None:
         bot.drive_distance(meters, direction=bot.FORWARD, speed=speed)
 
-    # Back-compat alias (if other scripts used this name)
+    # Back-compat alias (if another script uses this name)
     @staticmethod
     def go_forward_step(bot, meters: float, speed: Optional[int] = None) -> None:
         ArucoUtils.forward_step(bot, meters, speed)

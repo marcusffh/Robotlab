@@ -49,7 +49,7 @@ ALIGN_PULSE_MS  = 90
 PX_TOL          = 30       # center deadband (px)
 
 # TRACK_DRIVE (smooth, no jerks)
-BASE_BIAS       = -0.06    # cancels systematic left drift
+BASE_BIAS       = 0.00   # cancels systematic left drift
 EMA_ALPHA       = 0.30     # low-pass for pixel error
 Kp              = 0.0008   # proportional steering gain (px -> bias)
 Ki              = 0.00002  # tiny integral term for slow residual bias
@@ -194,13 +194,7 @@ def spin_pwm_step(arlo, power, dir_sign, period_ms=SPIN_PERIOD_MS, duty=SPIN_DUT
         if elapsed >= off_ms:
             spin_continuous(arlo, power, dir_sign); _spin_state["on"] = True; _spin_state["t0"] = now
 
-# ===== Slew limiting (avoid jerky power jumps) =====
-def slew_toward(prev, target, max_step):
-    """Smoothly move prev toward target, clamping by max_step."""
-    delta = target - prev
-    if abs(delta) > max_step:
-        delta = max_step if delta > 0 else -max_step
-    return prev + delta
+
 
 # (Python identifiers can’t have spaces—rename properly.)
 def slew_toward(prev, target, max_step):

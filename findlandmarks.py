@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-findlandmarks.py
-----------------
-SEARCH → ALIGN → APPROACH with distance-aware steps and verbose prints.
-- Picamera2-only, BGR ArUco detector (DICT_6X6_250).
-- Stops by *distance* using f=1275 px, marker=140 mm.
+find_landmarks.py
+-----------------
+Duty-cycled “stop-to-look” SEARCH + default ArUco detector (BGR, DICT_6X6_250).
+Verbose prints while searching, when found, and while moving toward the tag.
+Uses your CalibratedRobot API (turn_angle, drive_distance, stop).
 """
 
 import time
 import numpy as np
 import cv2
 
-# Import CalibratedRobot; ensure 'exercise1/__init__.py' exists. If not, fallback to sys.path tweak.
+# Import CalibratedRobot; ensure exercise1/__init__.py exists.
 try:
     from Exercise1.CalibratedRobot import CalibratedRobot
 except ModuleNotFoundError:
@@ -21,32 +21,29 @@ except ModuleNotFoundError:
 
 from aruco_utils import ArucoUtils
 
-# ---- Camera / Marker calibration (from your Part 1) ----
-F_PX      = 1275.0          # focal length in pixels
-MARKER_MM = 140.0           # 14 cm marker
-TARGET_ID = 6            # set to an int to lock to one ID
+# ---- Camera/marker calibration (from Part 1) ----
+F_PX      = 1275.0           # focal length (px)
+MARKER_MM = 140.0            # 14 cm marker
+TARGET_ID = None             # set to an int to lock a specific id
 
-# ---- Behavior tuning ----
-# Search
-SEARCH_STEP_DEG = 10.0      # smaller pulse → finer sweep
-SEARCH_SLEEP_S  = 0.08
+# ---- Behavior tuning (angles/steps; stop-to-look) ----
+SEARCH_STEP_DEG = 8.0        # small rotate pulse, then stop & check
+SEARCH_SLEEP_S  = 0.06       # short settle after each pulse
 
-# Align
-PX_TOL              = 36    # larger deadband to avoid ping-pong when far
-PX_KP_DEG_PER_PX    = 0.05  # gentle mapping px->deg
-MAX_ALIGN_STEP_DEG  = 12.0  # cap corrections
+PX_TOL              = 30     # center deadband (px)
+PX_KP_DEG_PER_PX    = 0.05   # map pixel error -> degrees
+MAX_ALIGN_STEP_DEG  = 10.0
 
-# Approach / stopping
-STOP_AT_MM          = 450.0 # stand-off distance (mm)
-STEP_MIN_M          = 0.08  # min forward step (m)
-STEP_MAX_M          = 0.35  # max forward step (m)
-STEP_SCALE          = 0.6   # step = clamp((Z-STOP)/1000 * SCALE, MIN, MAX)
+STOP_AT_MM          = 450.0  # stand-off distance (mm)
+STEP_MIN_M          = 0.08   # min forward step (m)
+STEP_MAX_M          = 0.35   # max forward step (m)
+STEP_SCALE          = 0.6    # step = clamp((Z-STOP)/1000 * SCALE, MIN, MAX)
 
-# Robustness
-LOST_LIMIT          = 14    # tolerate brief drop-outs
+LOST_LIMIT          = 12     # tolerate brief dropouts
 LOOP_SLEEP_S        = 0.04
 
 def estimate_Z_mm(x_px, f_px=F_PX, X_mm=MARKER_MM) -> float:
+    # Z = f*X/x
     return (f_px * X_mm) / max(x_px, 1e-6)
 
 def choose_turn_deg(err_px: float) -> float:
@@ -59,16 +56,19 @@ def choose_step_m(Z_mm: float) -> float:
 
 def main():
     bot = CalibratedRobot()
-    aru = ArucoUtils(res=(1640, 1232), fps=30)  # high-res for far detection
+
+    # Camera matches your successful path: 960x720 main (sensor still runs 1640x1232)
+    aru = ArucoUtils(res=(960, 720), fps=30)
     aru.start_camera()
 
-    state       = "SEARCH"
-    lost        = 0
-    need_turn   = True   # in APPROACH: alternate small turn → forward step
+    state = "SEARCH"
+    lost  = 0
+    need_turn = True  # in APPROACH: alternate micro turn -> forward step
 
-    print("findlandmarks: SEARCH → ALIGN → APPROACH → DONE")
+    print("find_landmarks: SEARCH → ALIGN → APPROACH → DONE (duty-cycled search)")
     try:
         while True:
+            # Read a frame
             ok, frame = aru.read()
             if not ok:
                 bot.stop()
@@ -79,22 +79,25 @@ def main():
 
             # -------- SEARCH --------
             if state == "SEARCH":
-                print("[SEARCH] rotating {:.1f}° and checking camera…".format(SEARCH_STEP_DEG))
+                print(f"[SEARCH] rotate {SEARCH_STEP_DEG:.1f}° then check…")
                 if det is None:
+                    # small rotate pulse using your calibrated turn (then stop & look)
                     ArucoUtils.rotate_step(bot, SEARCH_STEP_DEG)
                     time.sleep(SEARCH_SLEEP_S)
                     continue
+
+                # Found something — print and move to ALIGN
                 x_px, cx, w = det["x_px"], det["cx"], det["w"]
                 err_px = cx - (w * 0.5)
                 Z_mm   = estimate_Z_mm(x_px)
-                print(f"[FOUND] id={det['id']} at ~{Z_mm:.0f} mm | size={x_px:.1f}px | err={err_px:.1f}px")
+                print(f"[FOUND] id={det['id']}  Z≈{Z_mm:.0f} mm  size={x_px:.1f}px  err={err_px:.1f}px")
                 state = "ALIGN"; lost = 0
                 continue
 
-            # common loss handling
+            # Common loss handling
             if det is None:
                 lost += 1
-                print(f"[LOST] frame without detection ({lost}/{LOST_LIMIT})")
+                print(f"[LOST] no detection ({lost}/{LOST_LIMIT})")
                 if lost >= LOST_LIMIT:
                     print("[LOST] returning to SEARCH")
                     state = "SEARCH"; lost = 0
@@ -102,9 +105,9 @@ def main():
                 continue
             lost = 0
 
-            # parse detection
+            # Parse detection
             cx, w = det["cx"], det["w"]
-            err_px = cx - (w * 0.5)         # + -> marker right of center
+            err_px = cx - (w * 0.5)      # + -> marker right of center
             x_px   = det["x_px"]
             Z_mm   = estimate_Z_mm(x_px)
 
@@ -122,6 +125,7 @@ def main():
 
             # -------- APPROACH --------
             if state == "APPROACH":
+                # Stop by *distance* (robust vs pixel-size)
                 if Z_mm <= STOP_AT_MM:
                     bot.stop()
                     print(f"[DONE] close enough: Z≈{Z_mm:.0f} mm (≤ {STOP_AT_MM:.0f} mm)")
