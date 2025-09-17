@@ -20,7 +20,7 @@ import numpy as np
 import cv2
 
 from Exercise1.CalibratedRobot import CalibratedRobot
-from arucoutils import ArucoUtils, CameraConfig, Intrinsics
+from aruco_utils import ArucoUtils, CameraConfig, Intrinsics
 
 # ------------- Tuning -------------
 # Search behaviour
