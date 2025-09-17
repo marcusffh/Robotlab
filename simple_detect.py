@@ -1,14 +1,14 @@
-# map_landmarks_no_rvec.py  — ArUco map using ONLY tvec (no rvec usage)
+
 import time, cv2, numpy as np
 from picamera2 import Picamera2
 
-# ---- Camera / marker params ----
-F_PX          = 1275.0          # focal length [px] from your calibration
+# marker parameters
+F_PX          = 1275.26         # focal length [px] from calibration
 MARKER_SIZE_M = 0.140           # marker side length [m]
 IMG_W, IMG_H  = 960, 720
 FPS           = 30
 
-# ---- Intrinsics (cx,cy at image center; no distortion) ----
+# Intrinstic camera matrix
 K = np.array([[F_PX, 0.0, IMG_W/2.0],
               [0.0,  F_PX, IMG_H/2.0],
               [0.0,  0.0,        1.0]], dtype=np.float32)
@@ -24,7 +24,7 @@ def make_camera(w=IMG_W, h=IMG_H, fps=FPS):
     )
     cam.configure(cfg)
     cam.start()
-    time.sleep(0.8)  # warm-up
+    time.sleep(0.8)
     def read():
         rgb = cam.capture_array("main")
         if rgb is None or rgb.size == 0:
@@ -43,23 +43,23 @@ def map_landmarks_once():
             raise RuntimeError("Failed to grab frame from Picamera2")
 
         aruco = cv2.aruco
-        DICT  = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)  # 6x6 per your tags
+        DICT  = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
         params = aruco.DetectorParameters_create()
 
         corners, ids, _ = aruco.detectMarkers(frame, DICT, parameters=params)
         if ids is None or len(corners) == 0:
             print("No markers seen."); return []
 
-        # Pose estimate: we ignore rvec completely (use '_' placeholder)
+        # Pose estimate, ignore rvec ('_' placeholder)
         _, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, MARKER_SIZE_M, K, dist)
 
-        # Build simple (id, X, Z) list in meters; camera frame: +Z forward, +X right
+        # Build (id, X, Z) list in meters, +Z forward, +X right
         out = []
         for i, mid in enumerate(ids.flatten()):
             t = tvecs[i][0]  # (x, y, z) in meters
             out.append((int(mid), float(t[0]), float(t[2])))
 
-        # Print tidy table
+        # Print table
         print("\nID    X_right[m]   Z_forward[m]")
         for mid, X, Z in out:
             print(f"{mid:3d}   {X:+8.3f}     {Z:+8.3f}")
