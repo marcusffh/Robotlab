@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""
-arucoutils.py
--------------
-Minimal utilities you can reuse across scripts.
-
-- Camera setup (Picamera2 preferred, else libcamera via GStreamer/OpenCV).
-- ArUco (DICT_6X6_250) detection.
-- Optional pose via estimatePoseSingleMarkers (if intrinsics + marker_size_m are provided).
-- Simple helpers for selecting a target and computing heading error.
-- Tiny wrappers that CALL your robot's public API (no redefinitions).
-
-Dependencies: OpenCV with aruco contrib.
-"""
+# Minimal ArUco utilities with Picamera2 only (no fallbacks).
 
 from __future__ import annotations
 from dataclasses import dataclass
@@ -19,9 +7,10 @@ from typing import Optional, List, Tuple
 import time
 import numpy as np
 import cv2
+from picamera2 import Picamera2  # hard requirement
 
+# ---------- Small data holders ----------
 
-# ---------------- Camera / Intrinsics ----------------
 
 @dataclass
 class CameraConfig:
@@ -39,8 +28,6 @@ class Intrinsics:
     dist: np.ndarray  # shape (k,) or (k,1)
 
 
-# ---------------- Detection container ----------------
-
 @dataclass
 class Detection:
     marker_id: int
@@ -50,83 +37,62 @@ class Detection:
     rvec: Optional[np.ndarray] = None # (3,)
     tvec: Optional[np.ndarray] = None # (3,)
 
-
-# ---------------- Main utility class ----------------
+# ---------- Main utility ----------
 
 class ArucoUtils:
     def __init__(
         self,
-        cam_cfg: CameraConfig = CameraConfig(),
         intrinsics: Optional[Intrinsics] = None,
-        marker_size_m: Optional[float] = None,          # physical side length (meters)
+        marker_size_m: Optional[float] = None,      # physical side length (meters)
         aruco_dict_id: int = cv2.aruco.DICT_6X6_250,
+        res: Tuple[int, int] = (1640, 1232),
+        fps: int = 30,
     ):
-        self.cam_cfg = cam_cfg
         self.intrinsics = intrinsics
         self.marker_size_m = marker_size_m
+        self.res = res
+        self.fps = fps
 
         self._dict = cv2.aruco.getPredefinedDictionary(aruco_dict_id)
         self._params = cv2.aruco.DetectorParameters_create()
 
-        self._picam2 = None
-        self._cap = None
+        self._picam2: Optional[Picamera2] = None
         self._started = False
 
-    # -------- Camera --------
+    # ----- Camera (Picamera2 only) -----
 
     def start_camera(self) -> None:
-        """Start camera (Picamera2 preferred, else libcamera via GStreamer/OpenCV)."""
         if self._started:
             return
-        try:
-            from picamera2 import Picamera2
-            self._picam2 = Picamera2()
-            frame_dur = int(1.0 / self.cam_cfg.fps * 1_000_000)
-            cfg = self._picam2.create_video_configuration(
-                main={"size": (self.cam_cfg.width, self.cam_cfg.height), "format": "RGB888"},
-                controls={"FrameDurationLimits": (frame_dur, frame_dur)},
-                queue=False,
-            )
-            self._picam2.configure(cfg)
-            self._picam2.start()
-            time.sleep(1.0)
-            self._started = True
-            return
-        except Exception:
-            self._picam2 = None  # fall through to OpenCV/GStreamer
-
-        gst = (
-            "libcamerasrc ! videobox autocrop=true ! "
-            f"video/x-raw, width=(int){self.cam_cfg.width}, height=(int){self.cam_cfg.height}, "
-            f"framerate=(fraction){self.cam_cfg.fps}/1 ! "
-            "videoconvert ! appsink"
+        w, h = self.res
+        frame_dur = int(1.0 / self.fps * 1_000_000)
+        cam = Picamera2()
+        cfg = cam.create_video_configuration(
+            main={"size": (w, h), "format": "RGB888"},
+            controls={"FrameDurationLimits": (frame_dur, frame_dur)},
+            queue=False,
         )
-        self._cap = cv2.VideoCapture(gst, cv2.CAP_GSTREAMER)
-        if not self._cap.isOpened():
-            raise RuntimeError("Camera init failed (Picamera2 and GStreamer both unavailable).")
+        cam.configure(cfg)
+        cam.start()
+        time.sleep(1.0)
+        self._picam2 = cam
         self._started = True
 
     def read(self):
         """Return (ok, frame_bgr)."""
         if not self._started:
             self.start_camera()
-        if self._picam2 is not None:
-            rgb = self._picam2.capture_array("main")
-            return True, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        return self._cap.read()
+        rgb = self._picam2.capture_array("main")
+        return True, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
     def stop_camera(self):
-        if self._picam2 is not None:
+        if self._picam2:
             try: self._picam2.stop()
             except: pass
             self._picam2 = None
-        if self._cap is not None:
-            try: self._cap.release()
-            except: pass
-            self._cap = None
         self._started = False
 
-    # -------- Detection / Pose --------
+    # ----- Detection / pose -----
 
     @staticmethod
     def _mean_side_px(c4x2: np.ndarray) -> float:
@@ -144,11 +110,13 @@ class ArucoUtils:
         c = np.mean(c4x2.reshape(4, 2), axis=0)
         return float(c[0]), float(c[1])
 
-    def detect(self, frame_bgr, restrict_ids: Optional[List[int]] = None, want_pose: Optional[bool] = None) -> List[Detection]:
-        """
-        Detect ArUco codes. If intrinsics + marker_size_m are set (or want_pose=True),
-        also estimate pose with cv2.aruco.estimatePoseSingleMarkers.
-        """
+    def detect(
+        self,
+        frame_bgr,
+        restrict_ids: Optional[List[int]] = None,
+        want_pose: Optional[bool] = None
+    ) -> List[Detection]:
+        """Detect markers; optionally estimate rvec/tvec if intrinsics+size are set."""
         if want_pose is None:
             want_pose = (self.intrinsics is not None and self.marker_size_m is not None)
 
@@ -162,7 +130,9 @@ class ArucoUtils:
                           [0, self.intrinsics.fy, self.intrinsics.cy],
                           [0, 0, 1]], dtype=np.float32)
             dist = self.intrinsics.dist.reshape(-1, 1).astype(np.float32)
-            rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, float(self.marker_size_m), K, dist)
+            rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+                corners, float(self.marker_size_m), K, dist
+            )
 
         dets: List[Detection] = []
         for i, c in enumerate(corners):
@@ -184,23 +154,20 @@ class ArucoUtils:
 
     @staticmethod
     def choose_largest(dets: List[Detection]) -> Optional[Detection]:
-        """Pick the detection with the largest apparent size (closest)."""
         return max(dets, key=lambda d: d.side_px) if dets else None
 
     @staticmethod
     def yaw_from_tvec(tvec: np.ndarray) -> float:
-        """Yaw error (rad): + if marker is to the right of camera forward axis."""
+        """Yaw error (rad): + if marker is to the right of camera forward."""
         x, _, z = float(tvec[0]), float(tvec[1]), float(tvec[2])
         return float(np.arctan2(x, z))
 
-    # -------- Robot call-through helpers (no redefinitions) --------
+    # ----- Simple call-through steps (use your robot API) -----
 
     @staticmethod
     def rotate_step(bot, angle_deg: float, speed: Optional[int] = None) -> None:
-        """Rotate the robot by a small step using CalibratedRobot.turn_angle()."""
         bot.turn_angle(angle_deg, speed=speed)
 
     @staticmethod
-    def go_forward_step(bot, meters: float, speed: Optional[int] = None) -> None:
-        """Move the robot forward a short distance using CalibratedRobot.drive_distance()."""
+    def forward_step(bot, meters: float, speed: Optional[int] = None) -> None:
         bot.drive_distance(meters, direction=bot.FORWARD, speed=speed)

@@ -24,7 +24,7 @@ from aruco_utils import ArucoUtils, CameraConfig, Intrinsics
 
 # ------------- Tuning -------------
 # Search behaviour
-SEARCH_STEP_DEG = 25.0          # rotate this much per search step
+SEARCH_STEP_DEG = 15.0          # rotate this much per search step
 SEARCH_SLEEP_S  = 0.1           # small settle time after each turn
 
 # Alignment (pose-based)
