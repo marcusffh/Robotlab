@@ -1,7 +1,7 @@
 # find_landmark_search_then_drive_updated.py
 import time
 import numpy as np
-from CameraDetect_util import CameraUtils, ArucoUtils
+from CameraDetection_util import CameraUtils, ArucoUtils
 import robot
 import cv2
 
