@@ -5,7 +5,7 @@
 import cv2
 import numpy as np
 import time
-from picamera import PiCamera
+from picamera2 import PiCamera2
 from picamera.array import PiRGBArray
 from Exercise1.CalibratedRobot import CalibratedRobot  # adjust path if needed
 
@@ -15,7 +15,7 @@ MARKER_LEN_M = 0.14     # 140 mm -> meters
 
 # Camera setup
 RES_W, RES_H = 640, 480
-camera = PiCamera()
+camera = PiCamera2()
 camera.resolution = (RES_W, RES_H)
 camera.framerate = 30
 raw = PiRGBArray(camera, size=(RES_W, RES_H))
