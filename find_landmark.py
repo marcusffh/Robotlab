@@ -1,61 +1,74 @@
 #!/usr/bin/env python3
 """
-find_landmark_arlo.py — slow duty-cycled search + local recover (no 360)
-------------------------------------------------------------------------
-States:
-  SEARCH  : very slow rotation via duty cycle, reading camera every frame
-  ALIGN   : gentle micro-rotations to center the marker (deadband)
-  APPROACH: short forward steps with smoothed heading correction
-  RECOVER : small oscillating turns toward last-seen side until reacquired
-  DONE    : stop at stand-off distance
+find_landmark_arlo.py — smooth visual-servo approach (no 360, no jerks)
+
+Workflow:
+  1) SEARCH: very slow duty-cycled rotation while reading camera every frame.
+  2) ALIGN : gentle micro-rotations to center marker (deadband).
+  3) LOCK  : once centered, estimate Z and "lock" target travel distance D = Z - STOP_AT_MM.
+  4) TRACK_DRIVE: continuous forward motion with smooth steering (PID-like), no jerky stop/go.
+                  We integrate the distance we’ve traveled (from Z updates) until D is used up.
+                  If the marker is momentarily lost, we keep gentle motion; if lost for long -> RECOVER.
+  5) RECOVER: small oscillating nudges toward last-seen side until reacquired (no 360).
+  6) DONE : stop at stand-off distance.
 
 Controls:
-  - Ctrl-C          -> safe stop
-  - type 'q' + Enter -> safe stop (works over SSH)
+  - Ctrl-C            -> safe stop
+  - Type 'q' + Enter  -> safe stop (SSH-friendly)
 
-Requires:
+Requirements:
   - robot.py (Robot.go_diff(...), Robot.stop())
-  - OpenCV with aruco, picamera2 preferred (GStreamer fallback)
+  - OpenCV (aruco)
+  - picamera2 preferred, GStreamer fallback (headless)
 """
 
 import time, sys, signal, select
 import numpy as np
 
 # ===== Camera / marker =====
-F_PX        = 1275.0     # calibrated focal length (px)
-MARKER_MM   = 140.0      # marker height (mm)
-TARGET_ID   = None       # lock to specific ArUco id (e.g., 6), or None
+F_PX        = 1275.0      # your calibrated focal length (px)
+MARKER_MM   = 140.0       # marker height (mm)
+TARGET_ID   = None        # lock to specific ArUco id (e.g., 6) or None
 
 # ===== Drive / calibration =====
 MIN_PWR     = 40
 MAX_PWR     = 127
-CAL_KL      = 0.98       # tuned scales (left)
-CAL_KR      = 1.00       # tuned scales (right)
+CAL_KL      = 0.98        # tuned scales (left)
+CAL_KR      = 1.00        # tuned scales (right)
 
 # ===== Behavior tuning =====
-# SEARCH: use duty-cycled spin for truly slow rotation
-SEARCH_PWR      = 44     # power while "on" (must be >= MIN_PWR if > 0)
-SEARCH_DIR      = +1     # +1 spin right, -1 spin left
-SPIN_PERIOD_MS  = 350    # total on+off period (ms)
-SPIN_DUTY       = 0.22   # fraction of period spinning (0.22 ≈ 22% ON)
+# SEARCH: duty-cycled spin for truly slow rotation
+SEARCH_PWR      = 44
+SEARCH_DIR      = +1       # +1 spin right, -1 spin left
+SPIN_PERIOD_MS  = 350
+SPIN_DUTY       = 0.22
 
-# ALIGN & APPROACH
-TURN_PWR        = 42     # min safe power, gentle micro-turns
-ALIGN_PULSE_MS  = 90     # slightly longer for smoothness
-DRIVE_PWR       = 58     # forward step power
-PX_TOL          = 30     # deadband around image center (px)
-Kp              = 0.0008 # px -> steering bias (gentle)
-BASE_BIAS       = -0.06  # cancels left drift
-EMA_ALPHA       = 0.30   # smoothing for pixel error (0..1)
+# ALIGN
+TURN_PWR        = 42
+ALIGN_PULSE_MS  = 90
+PX_TOL          = 30       # center deadband (px)
 
-STEP_MS         = 160    # forward step duration (short = stable)
-STOP_AT_MM      = 450.0  # stop distance
-LOST_LIMIT      = 8      # frames without detection -> lost
+# TRACK_DRIVE (smooth, no jerks)
+BASE_BIAS       = -0.06    # cancels systematic left drift
+EMA_ALPHA       = 0.30     # low-pass for pixel error
+Kp              = 0.0008   # proportional steering gain (px -> bias)
+Ki              = 0.00002  # tiny integral term for slow residual bias
+Kd              = 0.0018   # small differential term (on filtered error)
+BIAS_MAX        = 0.40     # clamp steering bias
+DRIVE_PWR_MIN   = 46       # min forward power while tracking
+DRIVE_PWR_MAX   = 68       # max forward power while tracking
+NEAR_MM_SLOW    = 900.0    # within this distance, ramp down speed
+STEP_DT         = 0.06     # control loop period target (s)
+SLEW_PER_STEP   = 10       # max change in power per loop (slew-rate limit)
 
-# RECOVER (local search, NO 360)
-REC_PWR         = 44           # recovery turning power (slow)
-REC_PULSE_MS    = 110          # single recovery pulse
-REC_MAX_PULSES  = 24           # cap before falling back to SEARCH
+STOP_AT_MM      = 450.0    # stand-off
+DONE_MM_HYST    = 30.0     # small hysteresis to avoid stop/restart
+
+# LOST handling
+LOST_LIMIT      = 10       # consecutive frames without detection -> RECOVER
+REC_PWR         = 44
+REC_PULSE_MS    = 110
+REC_MAX_PULSES  = 24
 
 # ===== Safe abort =====
 ABORT = False
@@ -150,6 +163,12 @@ def scaled_lr(pl, pr):
     if 0 < R < MIN_PWR: R = MIN_PWR
     return L, R
 
+def drive_set(arlo, left_power, right_power, fwd=True):
+    """Set continuous wheel powers with calibration."""
+    L, R = scaled_lr(left_power, right_power)
+    if fwd: arlo.go_diff(L, R, 1, 1)
+    else:   arlo.go_diff(L, R, 0, 0)
+
 def spin_continuous(arlo, power, dir_sign):
     power = max(MIN_PWR, min(MAX_PWR, int(power)))
     L,R = scaled_lr(power, power)
@@ -158,44 +177,34 @@ def spin_continuous(arlo, power, dir_sign):
 
 def stop(arlo): arlo.stop()
 
-def spin_pulse(arlo, power, dir_sign, ms):
-    spin_continuous(arlo, power, dir_sign)
-    time.sleep(ms/1000.0); arlo.stop()
-
-def drive_step_with_bias(arlo, base_power, bias, ms):
-    bias = max(min(bias, 0.5), -0.5)
-    Lp = base_power * (1.0 - bias)
-    Rp = base_power * (1.0 + bias)
-    L,R = scaled_lr(Lp, Rp)
-    arlo.go_diff(L, R, 1, 1)
-    time.sleep(ms/1000.0); arlo.stop()
-
-# ===== Duty-cycled slow spin =====
+# ===== Duty-cycled slow spin for SEARCH =====
 _spin_state = {"on": False, "t0": 0.0}
 def spin_pwm_step(arlo, power, dir_sign, period_ms=SPIN_PERIOD_MS, duty=SPIN_DUTY):
-    """
-    Toggle between spinning and stopped within each period so the average
-    angular speed is much slower, while still reading the camera every loop.
-    """
     now = time.time()
     if _spin_state["t0"] == 0.0:
         _spin_state["t0"] = now
         _spin_state["on"] = False
-
     elapsed = (now - _spin_state["t0"]) * 1000.0
     on_ms   = duty * period_ms
     off_ms  = (1.0 - duty) * period_ms
-
     if _spin_state["on"]:
         if elapsed >= on_ms:
-            stop(arlo)
-            _spin_state["on"] = False
-            _spin_state["t0"] = now
+            stop(arlo); _spin_state["on"] = False; _spin_state["t0"] = now
     else:
         if elapsed >= off_ms:
-            spin_continuous(arlo, power, dir_sign)
-            _spin_state["on"] = True
-            _spin_state["t0"] = now
+            spin_continuous(arlo, power, dir_sign); _spin_state["on"] = True; _spin_state["t0"] = now
+
+# ===== Slew limiting (avoid jerky power jumps) =====
+def slew toward(prev, target, max_step):
+    if target > prev + max_step: return prev + max_step
+    if target < prev - max_step: return prev - max_step
+    return target
+
+# (Python identifiers can’t have spaces—rename properly.)
+def slew_toward(prev, target, max_step):
+    if target > prev + max_step: return prev + max_step
+    if target < prev - max_step: return prev - max_step
+    return target
 
 # ===== Main =====
 def main():
@@ -206,41 +215,74 @@ def main():
     state = "SEARCH"
     lost = 0
     err_filt = 0.0
-    last_err_sign = +1   # +1 = last seen to the right; -1 = left
+    err_prev = 0.0
+    err_int  = 0.0
+    last_err_sign = +1
     rec_pulses = 0
 
-    print("SM: SEARCH (duty) -> ALIGN -> APPROACH -> RECOVER(no 360) -> DONE")
+    # distance locking
+    locked_travel_mm = None   # target travel distance once locked (Z0 - STOP_AT_MM)
+    remaining_mm     = None
+
+    # power smoothing
+    last_L = 0
+    last_R = 0
+
+    print("SM: SEARCH(duty) -> ALIGN -> LOCK -> TRACK_DRIVE -> RECOVER(no 360) -> DONE")
     try:
+        loop_t_prev = time.time()
         while True:
             if ABORT or user_requested_quit():
                 print("[ABORT] user stop"); break
 
+            # pace loop
+            now = time.time()
+            dt = now - loop_t_prev
+            if dt < STEP_DT:
+                time.sleep(STEP_DT - dt)
+                now = time.time()
+                dt = now - loop_t_prev
+            loop_t_prev = now
+
             ok, frame = read_fn()
             if not ok:
-                time.sleep(0.01); continue
+                stop(arlo)
+                continue
 
-            # ===== SEARCH: very slow via duty-cycle, read camera every frame =====
+            # ===== SEARCH: slow rotate and read each frame =====
             if state == "SEARCH":
-                spin_pwm_step(arlo, SEARCH_PWR, SEARCH_DIR)  # << slow spin
+                spin_pwm_step(arlo, SEARCH_PWR, SEARCH_DIR)
                 det = detect_marker(frame, restrict_id=TARGET_ID)
                 if det is None:
                     continue
                 stop(arlo)
                 state = "ALIGN"
                 lost = 0
+                locked_travel_mm = None
+                remaining_mm = None
                 # fall through with det
             else:
                 det = detect_marker(frame, restrict_id=TARGET_ID)
 
-            # ===== detection / loss handling =====
+            # ===== detection / loss =====
             if det is None:
                 lost += 1
-                if state in ("ALIGN","APPROACH"):
+                if state in ("ALIGN", "LOCK", "TRACK_DRIVE"):
                     if lost >= LOST_LIMIT:
+                        # enter local RECOVER using last seen side
                         state = "RECOVER"
                         rec_pulses = 0
                         stop(arlo)
                         continue
+                    # short grace: keep current drive (if any), but reduce power
+                    if state == "TRACK_DRIVE" and last_L>0 and last_R>0:
+                        # gently coast with reduced power while searching in place
+                        L_t = max(DRIVE_PWR_MIN, int(0.7*last_L))
+                        R_t = max(DRIVE_PWR_MIN, int(0.7*last_R))
+                        L = slew_toward(last_L, L_t, SLEW_PER_STEP)
+                        R = slew_toward(last_R, R_t, SLEW_PER_STEP)
+                        drive_set(arlo, L, R, True)
+                        last_L, last_R = L, R
                     continue
                 elif state == "RECOVER":
                     pass
@@ -256,44 +298,116 @@ def main():
             # ===== State logic =====
             if state == "ALIGN":
                 if abs(err) <= PX_TOL:
-                    state = "APPROACH"
+                    state = "LOCK"
                     continue
-                spin_pulse(arlo, TURN_PWR, +1 if err>0 else -1, ALIGN_PULSE_MS)
+                # gentle micro-pulse toward error sign
+                spin_continuous(arlo, TURN_PWR, +1 if err>0 else -1)
+                time.sleep(ALIGN_PULSE_MS/1000.0)
+                stop(arlo)
                 continue
 
-            if state == "APPROACH":
-                if Z <= STOP_AT_MM:
-                    stop(arlo)
-                    print(f"[DONE] stop at Z={Z:.0f} mm")
-                    break
-                # smoothed heading
-                err_filt = (1.0-EMA_ALPHA)*err_filt + EMA_ALPHA*err
-                steer = BASE_BIAS if abs(err_filt) <= PX_TOL else (BASE_BIAS + Kp*err_filt)
-                steer = 0.4 if steer>0.4 else (-0.4 if steer<-0.4 else steer)
-                drive_step_with_bias(arlo, DRIVE_PWR, steer, STEP_MS)
+            if state == "LOCK":
+                # Estimate initial distance and lock a travel budget
+                # D = max(0, Z - STOP_AT_MM). We'll integrate remaining_mm downward using Z updates.
+                D = max(0.0, Z - STOP_AT_MM)
+                locked_travel_mm = D
+                remaining_mm = D
+                # reset controller terms
+                err_filt = err
+                err_prev = err
+                err_int  = 0.0
+                state = "TRACK_DRIVE"
+                # fall through to drive this loop
+
+            if state == "TRACK_DRIVE":
+                # Update filtered error
+                err_filt = (1.0 - EMA_ALPHA) * err_filt + EMA_ALPHA * err
+                derr = (err_filt - err_prev) / max(dt, 1e-6)
+                err_prev = err_filt
+                # bounded integral (anti-windup)
+                if abs(err_filt) > PX_TOL:
+                    err_int += err_filt * dt
+                    err_int = max(min(err_int, 2000.0), -2000.0)
+                else:
+                    err_int *= 0.9  # decay in deadband
+
+                # steering bias: base + PID on (filtered) pixel error
+                steer = BASE_BIAS + Kp*err_filt + Ki*err_int + Kd*derr
+                steer = max(min(steer, BIAS_MAX), -BIAS_MAX)
+
+                # forward speed schedule (softer near goal)
+                # map remaining_mm (or Z) to power
+                dist_scale = 1.0
+                if remaining_mm is not None:
+                    if remaining_mm < NEAR_MM_SLOW:
+                        dist_scale = max(0.35, remaining_mm / NEAR_MM_SLOW)  # 0.35..1
+                else:
+                    if Z < NEAR_MM_SLOW:
+                        dist_scale = max(0.35, Z / NEAR_MM_SLOW)
+
+                base_power_target = DRIVE_PWR_MIN + (DRIVE_PWR_MAX - DRIVE_PWR_MIN) * dist_scale
+
+                # compute target L/R from bias
+                L_target = base_power_target * (1.0 - steer)
+                R_target = base_power_target * (1.0 + steer)
+
+                # slew limit to avoid jerks
+                L = slew_toward(last_L, int(L_target), SLEW_PER_STEP)
+                R = slew_toward(last_R, int(R_target), SLEW_PER_STEP)
+
+                drive_set(arlo, L, R, True)
+                last_L, last_R = L, R
+
+                # Update remaining travel using Z (distance-to-go reduction)
+                if remaining_mm is not None:
+                    # How much closer did we get this loop? Use previous Z minus new Z (monotonic, clamp)
+                    # We need Z_prev; keep it in closure:
+                    if not hasattr(main, "_Z_prev"):
+                        main._Z_prev = Z
+                    dZ = max(0.0, main._Z_prev - Z)  # mm closed this cycle
+                    remaining_mm = max(0.0, remaining_mm - dZ)
+                    main._Z_prev = Z
+
+                    # finish conditions (either remaining_mm near 0, or Z <= STOP_AT_MM+HYST)
+                    if remaining_mm <= 10.0 or Z <= (STOP_AT_MM + DONE_MM_HYST):
+                        stop(arlo)
+                        print(f"[DONE] stop at Z={Z:.0f} mm (planned D={locked_travel_mm:.0f} mm)")
+                        break
+                else:
+                    # fallback: use absolute Z threshold
+                    if Z <= (STOP_AT_MM + DONE_MM_HYST):
+                        stop(arlo)
+                        print(f"[DONE] stop at Z={Z:.0f} mm")
+                        break
+
                 continue
 
             if state == "RECOVER":
-                # small oscillating local search around last seen side (no 360)
+                # Oscillating nudges around last-seen side (no 360)
                 dir_sign = last_err_sign if (rec_pulses % 2 == 0) else -last_err_sign
-                spin_pulse(arlo, REC_PWR, dir_sign, REC_PULSE_MS)
+                # small pulse, then check
+                spin_continuous(arlo, REC_PWR, dir_sign)
+                time.sleep(REC_PULSE_MS/1000.0)
+                stop(arlo)
 
                 ok2, frame2 = read_fn()
                 det2 = detect_marker(frame2, restrict_id=TARGET_ID) if ok2 else None
-
                 if det2 is not None:
                     x_px, cx, w = det2["x_px"], det2["cx"], det2["w"]
+                    Z = estimate_Z_mm(x_px)
                     err = cx - (w/2.0)
                     last_err_sign = +1 if err>0 else -1
-                    stop(arlo)
+                    # re-enter TRACK path via ALIGN to re-center quickly
                     state = "ALIGN"
                     lost = 0
                     continue
 
                 rec_pulses += 1
                 if rec_pulses >= REC_MAX_PULSES:
-                    stop(arlo)
+                    # fall back to SEARCH if we can’t reacquire locally
                     state = "SEARCH"
+                    last_L, last_R = 0, 0
+                    stop(arlo)
                     continue
                 continue
 
