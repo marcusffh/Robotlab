@@ -63,7 +63,7 @@ def make_camera(width=IMG_W, height=IMG_H, fps=FPS):
 # ==== Detection ====
 def detect_marker(frame_bgr, restrict_id=None):
     aruco = cv2.aruco
-    dictionary = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
+    dictionary = aruco.getPredefinedDictionary(aruco.DICT_8X8_250)
     params     = aruco.DetectorParameters_create()
     corners, ids, _ = aruco.detectMarkers(frame_bgr, dictionary, parameters=params)
     if ids is None or len(corners) == 0: return None
