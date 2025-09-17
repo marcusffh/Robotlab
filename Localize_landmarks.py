@@ -71,22 +71,11 @@ def search_and_drive():
             rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(
                 corners, marker_size, camera_matrix, dist_coeffs
             )
-            rvec = rvecs[0][0]
             tvec = tvecs[0][0]
 
-            # --- Rodrigues formula ---
-            R, _ = cv2.Rodrigues(rvec)   # 3x3 rotation matrix
-
-            # Transform the marker's forward vector (z-axis) to camera frame
-            marker_forward = np.array([0, 0, 1])
-            v_cam = R @ marker_forward   # v*+,- = k x v sin θ + ... (Rodrigues)
-
-            # Compute angle using dot and cross
-            beta = np.arccos(np.clip(v_cam[2]/np.linalg.norm(v_cam), -1.0, 1.0))  # angle w.r.t camera forward
-            sign = np.sign(v_cam[0])  # positive if marker is right, negative if left
-            angle = np.degrees(beta) * sign
-
-            dist = tvec[2]/1000
+            # Compute angle and distance
+            angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))  # flip sign if needed
+            dist = tvec[2]/1000 
             dist = max(dist, 0)  # avoid negative distance
 
             print(f"Detected marker IDs: {ids.flatten()}")
@@ -96,7 +85,7 @@ def search_and_drive():
             calArlo.turn_angle(angle)
             if dist > 0 and not driving:
                 driving = True
-                calArlo.drive_distance(-dist)
+                calArlo.drive_distance(dist)
 
             if dist <= 0:
                 print("Reached landmark!")
