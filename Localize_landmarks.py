@@ -96,7 +96,7 @@ def search_and_drive():
             calArlo.turn_angle(angle)
             if dist > 0 and not driving:
                 driving = True
-                calArlo.drive_distance(dist)
+                calArlo.drive_distance(-dist)
 
             if dist <= 0:
                 print("Reached landmark!")
