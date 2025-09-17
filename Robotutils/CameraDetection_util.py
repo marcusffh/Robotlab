@@ -11,7 +11,7 @@ class CameraUtils:
     OpenCV.
     """
     ## Camera calibration
-    def __init__(self, width=640, height=480, fx=1275, fy=1275, cx=None, cy=None):
+    def __init__(self, width=640, height=480, fx=1360, fy=1360, cx=None, cy=None):
         self.picam2 = None
         self.width = width
         self.height = height
@@ -20,10 +20,7 @@ class CameraUtils:
         self.cx = cx if cx is not None else width / 2 ## 
         self.cy = cy if cy is not None else height / 2 ##
         self.dist = np.zeros((5, 1))  # assume no distortion
-
-    @property
-    def camera_matrix(self):
-        return np.array([
+        self.camera_matrix = np.array([
             [self.fx, 0, self.cx],
             [0, self.fy, self.cy],
             [0,     0,     1]
@@ -45,7 +42,7 @@ class CameraUtils:
             raise RuntimeError("Camera not started. Call start_camera() first.")
         frame_rgb = self.picam2.capture_array()
         frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-        return True, frame_bgr
+        return frame_bgr
 
     def stop_camera(self):
         """Stop the PiCamera2."""
@@ -77,6 +74,18 @@ class ArucoUtils:
             corners, self.marker_length, camera_matrix, dist_coeffs
         ) #Computes 3d pose of of each detected marker
         return rvecs, tvecs #(Rotation vector, translation vector)
+    
+    def compute_distance_to_marker(self, tvec):
+        dist = tvec[2]
+        dist = max(dist, 0)  # avoid negative distance
+        return dist
+    
+    def compute_rotation_to_marker(self, tvecs): #mærkelig formel lol
+            tvec = tvecs[0][0]
+            # Compute angle
+            angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))
+            return angle
+        
 
 
 
