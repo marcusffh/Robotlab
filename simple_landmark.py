@@ -24,6 +24,10 @@ Kp_far     = 0.10; Kp_near=0.06
 MAX_STEER  = 24
 EMA_ALPHA  = 0.35
 
+# ==== SEARCH pulse timing (rotate -> stop -> capture) ====
+TURN_PULSE_DT = 0.10          # rotate for 100 ms
+SNAP_DT       = 0.06          # stop for 60 ms to get a sharp frame
+
 def clamp_power(p):
     if p <= 0: return 0
     return max(MIN_PWR, min(MAX_PWR, int(round(p))))
@@ -63,7 +67,8 @@ def make_camera(width=IMG_W, height=IMG_H, fps=FPS):
 # ==== Detection ====
 def detect_marker(frame_bgr, restrict_id=None):
     aruco = cv2.aruco
-    dictionary = aruco.getPredefinedDictionary(aruco.DICT_8X8_250)
+    
+    dictionary = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
     params     = aruco.DetectorParameters_create()
     corners, ids, _ = aruco.detectMarkers(frame_bgr, dictionary, parameters=params)
     if ids is None or len(corners) == 0: return None
@@ -97,49 +102,47 @@ lost_frames = 0
 err_filt = 0.0
 
 try:
-    # start stopped; we only rotate in SEARCH
-    arlo.stop()
+    arlo.stop()  # start stationary
 
     while True:
+        # ---- SEARCH: rotate -> stop -> capture (for long-range detection) ----
+        if state == SEARCH:
+            arlo.go_diff(TURN_PWR, TURN_PWR, 0, 1)  # rotate in place (left)
+            time.sleep(TURN_PULSE_DT)
+            arlo.stop()
+            time.sleep(SNAP_DT)
+
+        # Capture a frame (works for both SEARCH and DRIVE)
         ok, frame = read()
         if not ok:
-            if state == SEARCH:
-                arlo.go_diff(TURN_PWR, TURN_PWR, 0, 1)  # keep spinning
             continue
 
         det = detect_marker(frame, restrict_id=TARGET_ID)
 
         if state == SEARCH:
-            # rotate in place until we see REQUIRED_HITS in a row
             if det is None:
                 hits = 0
-                arlo.go_diff(TURN_PWR, TURN_PWR, 0, 1)  # rotate left on center
                 continue
             hits += 1
             if hits < REQUIRED_HITS:
-                arlo.go_diff(TURN_PWR, TURN_PWR, 0, 1)  # confirm with another frame
                 continue
-            # lock: stop rotation, switch to DRIVE
+            # lock on → switch to DRIVE (DRIVE logic unchanged)
             arlo.stop()
             state = DRIVE
             lost_frames = 0
             err_filt = 0.0
-            # immediately start rolling forward
-            arlo.go_diff(BASE_PWR, BASE_PWR, 1, 1)
+            arlo.go_diff(BASE_PWR, BASE_PWR, 1, 1)  # start rolling forward
             continue
 
-        # ---- DRIVE state ----
+        # ---- DRIVE state (UNCHANGED) ----
         if det is None:
             lost_frames += 1
             if lost_frames > LOST_TO_SEARCH:
-                # fully lost: stop & re-enter SEARCH
                 arlo.stop()
                 state = SEARCH
                 hits = 0
-            # otherwise: keep last command (coast) for a bit
             continue
 
-        # we have a detection
         lost_frames = 0
 
         # horizontal error
