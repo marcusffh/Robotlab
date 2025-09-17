@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-find_landmark_arlo.py — smooth visual-servo approach (no 360, no jerks)
+find_landmark_arlo.py — lock → go straight → stop at 5 cm (no steering after lock)
 """
 
 import time, sys, signal, select
@@ -14,7 +14,7 @@ TARGET_ID   = None
 # ===== Drive / calibration =====
 MIN_PWR     = 40
 MAX_PWR     = 127
-CAL_KL      = 0.98   # match your straight-driver
+CAL_KL      = 0.98   # from your straight driver
 CAL_KR      = 1.00
 
 # ===== Behavior tuning =====
@@ -29,28 +29,22 @@ TURN_PWR        = 42
 ALIGN_PULSE_MS  = 90
 PX_TOL          = 30
 
-# TRACK_DRIVE
-BASE_BIAS       = 0.0      # <-- was -0.06 (caused right snap)
-EMA_ALPHA       = 0.30
-Kp              = 0.0008
-Ki              = 0.00003  # tiny bump so it trims residual drift
-Kd              = 0.0018
-BIAS_MAX        = 0.40
-STEER_DEADBAND  = 0.02     # new: keep tiny steer = 0
-DRIVE_PWR_MIN   = 46
-DRIVE_PWR_MAX   = 68
+# STRAIGHT_DRIVE (no steering)
+DRIVE_PWR_MIN   = 50
+DRIVE_PWR_MAX   = 70
 NEAR_MM_SLOW    = 900.0
 STEP_DT         = 0.06
 SLEW_PER_STEP   = 10
 
-STOP_AT_MM      = 450.0
-DONE_MM_HYST    = 30.0
+STOP_AT_MM      = 50.0   # 5 cm
+DONE_MM_HYST    = 10.0
 
 # LOST handling
-LOST_LIMIT      = 10
-REC_PWR         = 44
-REC_PULSE_MS    = 110
-REC_MAX_PULSES  = 24
+LOST_LIMIT_SEARCH   = 10      # frames in SEARCH/ALIGN
+LOST_LIMIT_STRAIGHT = 6       # stricter while driving straight
+REC_PWR             = 44
+REC_PULSE_MS        = 110
+REC_MAX_PULSES      = 24
 
 # ===== Safe abort =====
 ABORT = False
@@ -175,7 +169,6 @@ def spin_pwm_step(arlo, power, dir_sign, period_ms=SPIN_PERIOD_MS, duty=SPIN_DUT
         if elapsed >= off_ms:
             spin_continuous(arlo, power, dir_sign); _spin_state["on"] = True; _spin_state["t0"] = now
 
-# Smoothing helper
 def slew_toward(prev, target, max_step):
     if target > prev + max_step: return prev + max_step
     if target < prev - max_step: return prev - max_step
@@ -189,19 +182,18 @@ def main():
 
     state = "SEARCH"
     lost = 0
-    err_filt = 0.0
-    err_prev = 0.0
-    err_int  = 0.0
     last_err_sign = +1
     rec_pulses = 0
 
+    # distance locking
     locked_travel_mm = None
     remaining_mm     = None
 
+    # power smoothing
     last_L = 0
     last_R = 0
 
-    print("SM: SEARCH(duty) -> ALIGN -> LOCK -> TRACK_DRIVE -> RECOVER(no 360) -> DONE")
+    print("SM: SEARCH(duty) -> ALIGN -> LOCK -> STRAIGHT_DRIVE(no steering) -> RECOVER -> DONE")
     try:
         loop_t_prev = time.time()
         while True:
@@ -236,22 +228,21 @@ def main():
             else:
                 det = detect_marker(frame, restrict_id=TARGET_ID)
 
-            # ===== detection / loss =====
+            # ===== detection / loss handling =====
             if det is None:
                 lost += 1
-                if state in ("ALIGN", "LOCK", "TRACK_DRIVE"):
-                    if lost >= LOST_LIMIT:
-                        state = "RECOVER"
-                        rec_pulses = 0
+                if state in ("ALIGN", "LOCK"):
+                    if lost >= LOST_LIMIT_SEARCH:
+                        state = "RECOVER"; rec_pulses = 0; stop(arlo)
+                    continue
+                elif state == "STRAIGHT_DRIVE":
+                    # safety: if we can't see the marker soon, stop
+                    if lost >= LOST_LIMIT_STRAIGHT:
                         stop(arlo)
-                        continue
-                    if state == "TRACK_DRIVE" and last_L>0 and last_R>0:
-                        L_t = max(DRIVE_PWR_MIN, int(0.7*last_L))
-                        R_t = max(DRIVE_PWR_MIN, int(0.7*last_R))
-                        L = slew_toward(last_L, L_t, SLEW_PER_STEP)
-                        R = slew_toward(last_R, R_t, SLEW_PER_STEP)
-                        drive_set(arlo, L, R, True)
-                        last_L, last_R = L, R
+                        print("[STOP] Lost marker during straight drive.")
+                        break
+                    # keep driving with current equal powers
+                    drive_set(arlo, last_L, last_R, True)
                     continue
                 elif state == "RECOVER":
                     pass
@@ -261,7 +252,7 @@ def main():
                 x_px, cx, w = det["x_px"], det["cx"], det["w"]
                 Z = estimate_Z_mm(x_px)
                 err = cx - (w/2.0)
-                last_err_sign = +1 if err > 0 else -1
+                last_err_sign = +1 if err>0 else -1
                 lost = 0
 
             # ===== State logic =====
@@ -275,81 +266,51 @@ def main():
                 continue
 
             if state == "LOCK":
+                # lock the distance budget; we will not steer after this
                 D = max(0.0, Z - STOP_AT_MM)
                 locked_travel_mm = D
                 remaining_mm = D
-                err_filt = err
-                err_prev = err
-                err_int  = 0.0
-                state = "TRACK_DRIVE"
+                # reset Z history for distance integration
+                main._Z_prev = Z
+                state = "STRAIGHT_DRIVE"
 
-            if state == "TRACK_DRIVE":
-                # Filtered error
-                err_filt = (1.0 - EMA_ALPHA) * err_filt + EMA_ALPHA * err
-                derr = (err_filt - err_prev) / max(dt, 1e-6)
-                err_prev = err_filt
-
-                # Integral (bounded)
-                if abs(err_filt) > PX_TOL:
-                    err_int += err_filt * dt
-                    err_int = max(min(err_int, 2000.0), -2000.0)
-                else:
-                    err_int *= 0.9
-
-                # --- Fix 1: kill derivative when centered to avoid lock snap
-                if abs(err_filt) <= PX_TOL:
-                    derr = 0.0
-
-                steer = BASE_BIAS + Kp*err_filt + Ki*err_int + Kd*derr
-
-                # --- Fix 2: steer deadband
-                if -STEER_DEADBAND < steer < STEER_DEADBAND:
-                    steer = 0.0
-
-                steer = max(min(steer, BIAS_MAX), -BIAS_MAX)
-
-                # Forward speed schedule
-                dist_scale = 1.0
+            if state == "STRAIGHT_DRIVE":
+                # forward speed schedule (softer near goal) — equal wheels only
                 if remaining_mm is not None:
                     if remaining_mm < NEAR_MM_SLOW:
                         dist_scale = max(0.35, remaining_mm / NEAR_MM_SLOW)
+                    else:
+                        dist_scale = 1.0
                 else:
-                    if Z < NEAR_MM_SLOW:
-                        dist_scale = max(0.35, Z / NEAR_MM_SLOW)
+                    dist_scale = 1.0
 
                 base_power_target = DRIVE_PWR_MIN + (DRIVE_PWR_MAX - DRIVE_PWR_MIN) * dist_scale
 
-                L_target = base_power_target * (1.0 - steer)
-                R_target = base_power_target * (1.0 + steer)
+                # equal powers (NO steering)
+                L_target = base_power_target
+                R_target = base_power_target
 
                 L = slew_toward(last_L, int(L_target), SLEW_PER_STEP)
                 R = slew_toward(last_R, int(R_target), SLEW_PER_STEP)
-
                 drive_set(arlo, L, R, True)
                 last_L, last_R = L, R
 
-                # Telemetry (helps verify no hidden bias)
-                print(f"err={err_filt:+6.1f}px steer={steer:+.3f} L={L:3d} R={R:3d} Z={Z:5.0f}mm rem={remaining_mm if remaining_mm is not None else -1:.0f}")
+                # telemetry
+                print(f"[STRAIGHT] Z={Z:5.0f}mm  rem={remaining_mm:6.0f}  L=R={L}")
 
-                # Remaining travel update
-                if remaining_mm is not None:
-                    if not hasattr(main, "_Z_prev"):
-                        main._Z_prev = Z
-                    dZ = max(0.0, main._Z_prev - Z)
-                    remaining_mm = max(0.0, remaining_mm - dZ)
-                    main._Z_prev = Z
-                    if remaining_mm <= 10.0 or Z <= (STOP_AT_MM + DONE_MM_HYST):
-                        stop(arlo)
-                        print(f"[DONE] stop at Z={Z:.0f} mm (planned D={locked_travel_mm:.0f} mm)")
-                        break
-                else:
-                    if Z <= (STOP_AT_MM + DONE_MM_HYST):
-                        stop(arlo)
-                        print(f"[DONE] stop at Z={Z:.0f} mm")
-                        break
+                # update remaining based on Z only
+                dZ = max(0.0, main._Z_prev - Z)
+                remaining_mm = max(0.0, remaining_mm - dZ)
+                main._Z_prev = Z
+
+                if remaining_mm <= 5.0 or Z <= (STOP_AT_MM + DONE_MM_HYST):
+                    stop(arlo)
+                    print(f"[DONE] stop at Z={Z:.0f} mm (planned D={locked_travel_mm:.0f} mm)")
+                    break
                 continue
 
             if state == "RECOVER":
+                # small local oscillation without full 360
                 dir_sign = last_err_sign if (rec_pulses % 2 == 0) else -last_err_sign
                 spin_continuous(arlo, REC_PWR, dir_sign)
                 time.sleep(REC_PULSE_MS/1000.0)
