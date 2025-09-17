@@ -63,7 +63,7 @@ def map_landmarks_once():
             return []
 
         # Pose for all markers (units follow MARKER_SIZE_M → meters)
-        tvecs, _ = aruco.estimatePoseSingleMarkers(corners, MARKER_SIZE_M, K, dist)
+        rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, MARKER_SIZE_M, K, dist)
 
         # Build simple (id, X, Z) list in meters; camera frame: +Z forward, +X right
         out = []
