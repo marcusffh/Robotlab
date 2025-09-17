@@ -1,78 +1,74 @@
 #!/usr/bin/env python3
 """
-find_landmark_arlo.py
------------------------------------------
-Rotate-search for an ArUco, then drive toward it and stop in front.
+find_landmark_arlo.py — continuous search + local recover (no 360)
+------------------------------------------------------------------
+States:
+  SEARCH  : slow continuous rotation, read camera every frame
+  ALIGN   : micro-rotate to center marker (pixel deadband)
+  APPROACH: short forward steps with smoothed heading correction
+  RECOVER : small oscillating turns toward last-seen side until reacquired
+  DONE    : stop at standoff
 
-Behavior:
-  SEARCH : spin in short pulses; after each pulse STOP and check camera
-  ALIGN  : micro-rotate to center the marker (pixel deadband)
-  APPROACH: short forward steps with heading correction (smoothed)
-  DONE   : stop at stand-off distance
+Controls:
+  Ctrl-C          -> safe stop
+  type 'q'+Enter  -> safe stop (over SSH)
 
-Controls (while running):
-  - Ctrl-C  -> immediate safe stop
-  - type 'q' then Enter -> safe stop (works over SSH)
-
-Requirements:
-  - robot.py in same folder (with Robot.go_diff(...) and Robot.stop())
-  - OpenCV with aruco module available
-  - picamera2 preferred; falls back to GStreamer/OpenCV (headless)
+Requires:
+  - robot.py (Robot.go_diff(...), Robot.stop())
+  - OpenCV (aruco), picamera2 preferred, GStreamer fallback
 """
 
-import time, math, os, sys, signal, select
+import time, sys, signal, select
 import numpy as np
 
-# =============== CAMERA / MARKER ==================
-F_PX        = 1275.0      # calibrated focal length (px) from Part 1
-MARKER_MM   = 140.0       # marker physical height (mm) (14 cm)
-TARGET_ID   = None        # set to an int (e.g. 6) to lock to a specific ID
+# ===== Camera / marker =====
+F_PX        = 1275.0     # calibrated focal length (px)
+MARKER_MM   = 140.0      # marker height (mm)
+TARGET_ID   = None       # lock to specific ArUco id (e.g. 6), or None
 
-# =============== DRIVE / CONTROL ==================
-MIN_PWR     = 40          # safe lower bound for go_diff power
+# ===== Drive / calibration =====
+MIN_PWR     = 40
 MAX_PWR     = 127
+CAL_KL      = 0.98       # your tuned scales
+CAL_KR      = 1.00
 
-# Motor calibration (match your tuned values)
-CAL_KL      = 0.98        # left motor scale
-CAL_KR      = 1.00        # right motor scale
+# ===== Behavior tuning =====
+SEARCH_PWR      = 44     # slow rotation power
+SEARCH_DIR      = +1     # +1 spin right, -1 spin left
 
-# Search/align/approach tuning
-SEARCH_PWR  = 60          # spin power during SEARCH
-TURN_PWR    = 52          # tiny alignment pulses in ALIGN
-DRIVE_PWR   = 58          # forward power during APPROACH
+TURN_PWR        = 50     # align pulse power
+DRIVE_PWR       = 58     # forward step power
+PX_TOL          = 28     # deadband around image center (px)
+Kp              = 0.0009 # px -> steering bias
+BASE_BIAS       = -0.06  # cancels left drift
+EMA_ALPHA       = 0.30   # smoothing for pixel error
 
-SPIN_MS     = 120         # SEARCH spin pulse duration (ms)
-ALIGN_MS    = 60          # ALIGN pulse duration (ms)
-STEP_MS     = 180         # APPROACH forward burst (ms) — short for stability
-PX_TOL      = 28          # deadband in pixels around image center
+STEP_MS         = 180    # forward step duration
+STOP_AT_MM      = 450.0  # stop distance
+LOST_LIMIT      = 8      # frames without detection -> lost
 
-# Smoother steering:
-Kp          = 0.0009      # proportional gain: px -> bias
-BASE_BIAS   = -0.06       # constant bias (neg -> slight right) to cancel left drift
-EMA_ALPHA   = 0.30        # low-pass filter for pixel error [0..1]
+# RECOVER (local search, no 360)
+REC_PWR         = 46           # recovery turning power
+REC_PULSE_MS    = 120          # a single recovery pulse
+REC_MAX_PULSES  = 20           # max pulses before giving up to SEARCH
+REC_BIAS_INC    = 1            # expand pattern by flipping direction after each pulse
 
-STOP_AT_MM  = 450.0       # stand-off distance to stop in front (mm)
-LOST_LIMIT  = 8           # frames lost before returning to SEARCH
-
-# =============== ABORT HANDLING ===================
+# ===== Safe abort =====
 ABORT = False
-def _handle_sig(*_):
-    global ABORT
-    ABORT = True
-signal.signal(signal.SIGINT,  _handle_sig)
-signal.signal(signal.SIGTERM, _handle_sig)
+def _sig(*_):  # SIGINT/SIGTERM
+    global ABORT; ABORT = True
+signal.signal(signal.SIGINT, _sig)
+signal.signal(signal.SIGTERM, _sig)
 
 def user_requested_quit():
-    # type 'q' then Enter to request a clean quit
     if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
         s = sys.stdin.readline().strip().lower()
-        if s == 'q':
-            return True
+        if s == 'q': return True
     return False
 
-# ================= CAMERA HELPERS =================
+# ===== Camera helpers =====
 def make_camera(width=960, height=720, fps=30):
-    """Return (read_fn, release_fn) that yields BGR frames."""
+    """Return (read_fn, release_fn) -> (ok, BGR)."""
     try:
         from picamera2 import Picamera2
         import cv2
@@ -93,7 +89,7 @@ def make_camera(width=960, height=720, fps=30):
         return read_fn, release_fn
     except Exception as e:
         import cv2
-        def gst(w, h, f):
+        def gst(w,h,f):
             return ("libcamerasrc ! videobox autocrop=true ! "
                     f"video/x-raw, width=(int){w}, height=(int){h}, framerate=(fraction){f}/1 ! "
                     "videoconvert ! appsink")
@@ -101,16 +97,15 @@ def make_camera(width=960, height=720, fps=30):
         if not cap.isOpened():
             raise RuntimeError(f"Camera init failed: {e}")
         def read_fn():
-            ok, frame = cap.read()
-            return ok, frame
+            ok, frame = cap.read(); return ok, frame
         def release_fn():
             try: cap.release()
             except: pass
         return read_fn, release_fn
 
-# ================== VISION ========================
+# ===== Vision =====
 def detect_marker(frame_bgr, restrict_id=None):
-    """Detect DICT_6X6_250; return dict {id,x_px,cx,w} or None."""
+    """Detect DICT_6X6_250; return {id,x_px,cx,w} or None."""
     import cv2
     aruco = cv2.aruco
     dictionary = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
@@ -118,137 +113,178 @@ def detect_marker(frame_bgr, restrict_id=None):
     corners_list, ids, _ = aruco.detectMarkers(frame_bgr, dictionary, parameters=parameters)
     if ids is None or len(corners_list) == 0:
         return None
-    # choose largest by perimeter (more stable)
     best = None
     for c, mid in zip(corners_list, ids.flatten()):
         if restrict_id is not None and int(mid) != restrict_id:
             continue
-        pts = c.reshape(-1, 2)  # TL, TR, BR, BL
+        pts = c.reshape(-1,2)  # TL,TR,BR,BL
         per = (np.linalg.norm(pts[0]-pts[1]) + np.linalg.norm(pts[1]-pts[2]) +
                np.linalg.norm(pts[2]-pts[3]) + np.linalg.norm(pts[3]-pts[0]))
         if best is None or per > best[0]:
             best = (per, int(mid), pts)
-    if best is None:
-        return None
+    if best is None: return None
     _, mid, pts = best
     TL, TR, BR, BL = pts
     v1 = np.linalg.norm(TL - BL)
     v2 = np.linalg.norm(TR - BR)
-    x_px = 0.5*(v1+v2)    # vertical pixel height (mean of both sides)
+    x_px = 0.5*(v1+v2)
     cx  = float((TL[0]+TR[0]+BR[0]+BL[0]) / 4.0)
     h, w = frame_bgr.shape[:2]
     return {"id": mid, "x_px": float(x_px), "cx": cx, "w": w}
 
 def estimate_Z_mm(x_px, f_px=F_PX, X_mm=MARKER_MM):
-    # Z = f * X / x
     return (f_px * X_mm) / max(x_px, 1e-6)
 
-# ================ ROBOT HELPERS ===================
+# ===== Robot helpers =====
 def clamp(p): 
-    return 0 if p <= 0 else MAX_PWR if p > MAX_PWR else int(p)
+    return 0 if p<=0 else MAX_PWR if p>MAX_PWR else int(p)
 
-def scaled_lr(power_left, power_right):
-    # apply per-side calibration + enforce min power (avoid stalling)
-    L = clamp(power_left  * CAL_KL) if power_left  > 0 else 0
-    R = clamp(power_right * CAL_KR) if power_right > 0 else 0
+def scaled_lr(pl, pr):
+    L = clamp(pl * CAL_KL) if pl>0 else 0
+    R = clamp(pr * CAL_KR) if pr>0 else 0
     if 0 < L < MIN_PWR: L = MIN_PWR
     if 0 < R < MIN_PWR: R = MIN_PWR
     return L, R
 
-def spin_left(arlo, power, ms):
-    L, R = scaled_lr(power, power)
-    arlo.go_diff(L, R, 0, 1)  # left backward, right forward
-    time.sleep(ms/1000.0); arlo.stop()
+def spin_continuous(arlo, power, dir_sign):
+    power = max(MIN_PWR, min(MAX_PWR, int(power)))
+    L,R = scaled_lr(power, power)
+    if dir_sign >= 0: arlo.go_diff(L, R, 1, 0)
+    else:             arlo.go_diff(L, R, 0, 1)
 
-def spin_right(arlo, power, ms):
-    L, R = scaled_lr(power, power)
-    arlo.go_diff(L, R, 1, 0)  # left forward, right backward
+def spin_pulse(arlo, power, dir_sign, ms):
+    spin_continuous(arlo, power, dir_sign)
     time.sleep(ms/1000.0); arlo.stop()
-
-def align_pulse(arlo, err_px):
-    if err_px > 0:  # marker right of center -> spin right
-        spin_right(arlo, TURN_PWR, ALIGN_MS)
-    else:
-        spin_left(arlo, TURN_PWR, ALIGN_MS)
 
 def drive_step_with_bias(arlo, base_power, bias, ms):
-    # bias in [-1..1]; positive -> steer right (more power to right wheel)
+    bias = max(min(bias, 0.5), -0.5)
     Lp = base_power * (1.0 - bias)
     Rp = base_power * (1.0 + bias)
-    L, R = scaled_lr(Lp, Rp)
+    L,R = scaled_lr(Lp, Rp)
     arlo.go_diff(L, R, 1, 1)
     time.sleep(ms/1000.0); arlo.stop()
 
-# ===================== MAIN =======================
+def stop(arlo): arlo.stop()
+
+# ===== Main =====
 def main():
     import robot as rb
     arlo = rb.Robot()
-
     read_fn, release_fn = make_camera()
+
     state = "SEARCH"
     lost = 0
-    err_filt = 0.0  # EMA of pixel error
+    err_filt = 0.0
+    last_err_sign = +1   # +1 means marker was last seen on right; -1 on left
+    rec_pulses = 0       # pulses used in RECOVER (to flip small directions)
 
-    print("find_landmark_arlo: SEARCH -> ALIGN -> APPROACH -> DONE")
+    print("SM: SEARCH -> ALIGN -> APPROACH -> (RECOVER on loss) -> DONE")
     try:
         while True:
             if ABORT or user_requested_quit():
-                print("[ABORT] user requested stop"); break
+                print("[ABORT] user stop"); break
 
             ok, frame = read_fn()
             if not ok:
-                time.sleep(0.05); continue
+                time.sleep(0.01); continue
 
-            det = detect_marker(frame, restrict_id=TARGET_ID)
-
+            # ===== SEARCH: continuous slow rotation, read each frame =====
             if state == "SEARCH":
+                spin_continuous(arlo, SEARCH_PWR, SEARCH_DIR)
+                det = detect_marker(frame, restrict_id=TARGET_ID)
                 if det is None:
-                    spin_left(arlo, SEARCH_PWR, SPIN_MS)  # rotate, stop, check again
                     continue
-                state = "ALIGN"; lost = 0
-                continue
+                stop(arlo)
+                state = "ALIGN"
+                lost = 0
+                # fall through with det available
+            else:
+                det = detect_marker(frame, restrict_id=TARGET_ID)
 
+            # ===== handle detection / loss =====
             if det is None:
                 lost += 1
-                if lost >= LOST_LIMIT:
-                    state = "SEARCH"
-                continue
+                if state in ("ALIGN","APPROACH"):
+                    if lost >= LOST_LIMIT:
+                        # enter local RECOVER using last_err_sign (no 360)
+                        state = "RECOVER"
+                        rec_pulses = 0
+                        stop(arlo)
+                        continue
+                    # keep looping; maybe next frame sees it again
+                    continue
+                elif state == "RECOVER":
+                    # if we’re already recovering, we execute below
+                    pass
+                else:
+                    # e.g., still in SEARCH without detection -> loop
+                    continue
+            else:
+                # update last side where we saw the marker
+                x_px, cx, w = det["x_px"], det["cx"], det["w"]
+                Z = estimate_Z_mm(x_px)
+                err = cx - (w/2.0)
+                last_err_sign = +1 if err > 0 else -1
+                lost = 0
 
-            # Got a detection
-            lost = 0
-            x_px, cx, w = det["x_px"], det["cx"], det["w"]
-            Z = estimate_Z_mm(x_px)
-            err = cx - (w/2.0)  # +: marker right of center
-
+            # ===== State logic =====
             if state == "ALIGN":
                 if abs(err) <= PX_TOL:
                     state = "APPROACH"
-                else:
-                    align_pulse(arlo, err)
+                    continue
+                # micro pulses toward error sign
+                spin_pulse(arlo, TURN_PWR, +1 if err>0 else -1, 60)
                 continue
 
             if state == "APPROACH":
                 if Z <= STOP_AT_MM:
-                    arlo.stop()
+                    stop(arlo)
                     print(f"[DONE] stop at Z={Z:.0f} mm")
                     break
-
-                # --- smoothed heading control with deadband + constant bias ---
-                err_filt = (1.0 - EMA_ALPHA) * err_filt + EMA_ALPHA * err
-                if abs(err_filt) <= PX_TOL:
-                    steer = BASE_BIAS
-                else:
-                    steer = BASE_BIAS + Kp * err_filt
-                # clamp
-                steer = 0.4 if steer > 0.4 else (-0.4 if steer < -0.4 else steer)
-
+                # smoothed heading
+                err_filt = (1.0-EMA_ALPHA)*err_filt + EMA_ALPHA*err
+                steer = BASE_BIAS if abs(err_filt) <= PX_TOL else (BASE_BIAS + Kp*err_filt)
+                steer = 0.4 if steer>0.4 else (-0.4 if steer<-0.4 else steer)
                 drive_step_with_bias(arlo, DRIVE_PWR, steer, STEP_MS)
+                continue
+
+            if state == "RECOVER":
+                # small oscillating local search around last seen side
+                # pattern: try a short pulse toward last_err_sign, check; if still none, flip side, slightly expand
+                dir_sign = last_err_sign if (rec_pulses % 2 == 0) else -last_err_sign
+                spin_pulse(arlo, REC_PWR, dir_sign, REC_PULSE_MS)
+
+                # check camera right after the pulse
+                ok2, frame2 = read_fn()
+                if ok2:
+                    det2 = detect_marker(frame2, restrict_id=TARGET_ID)
+                else:
+                    det2 = None
+
+                if det2 is not None:
+                    # reacquired -> ALIGN
+                    x_px, cx, w = det2["x_px"], det2["cx"], det2["w"]
+                    err = cx - (w/2.0)
+                    last_err_sign = +1 if err>0 else -1
+                    stop(arlo)
+                    state = "ALIGN"
+                    lost = 0
+                    continue
+
+                rec_pulses += 1
+                if rec_pulses >= REC_MAX_PULSES:
+                    # give up and go back to SEARCH (still no 360)
+                    stop(arlo)
+                    state = "SEARCH"
+                    continue
+
+                # otherwise keep oscillating locally
                 continue
 
     except KeyboardInterrupt:
         print("\n[ABORT] Ctrl-C")
     finally:
-        try: arlo.stop()
+        try: stop(arlo)
         except: pass
         release_fn()
         print("Exiting.")
