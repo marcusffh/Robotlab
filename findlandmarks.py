@@ -116,7 +116,7 @@ def main():
                     if z > STOP_DIST_M:
                         remaining = max(0.0, z - STOP_DIST_M)
                         step = float(np.clip(remaining, STEP_FWD_MIN_M, STEP_FWD_M))
-                        ArucoUtils.go_forward_step(bot, step)
+                        ArucoUtils.forward_step(bot, step)
                         time.sleep(SEARCH_SLEEP_S)
                         continue
                     else:
@@ -135,7 +135,7 @@ def main():
 
                     # centered; step forward until the marker fills enough pixels
                     if det.side_px < STOP_SIDE_PX:
-                        ArucoUtils.go_forward_step(bot, STEP_FWD_M)
+                        ArucoUtils.forward_step(bot, STEP_FWD_M)
                         time.sleep(SEARCH_SLEEP_S)
                         continue
                     else:
