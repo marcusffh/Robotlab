@@ -52,19 +52,12 @@ dist_coeffs = np.zeros((5, 1))
 # ArUco dictionary
 aruco_dict = aruco.Dictionary_get(aruco.DICT_6X6_250)
 parameters = aruco.DetectorParameters_create()
-parameters.adaptiveThreshWinSizeMin = 3
-parameters.adaptiveThreshWinSizeMax = 23
-parameters.adaptiveThreshWinSizeStep = 5
-parameters.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
-parameters.cornerRefinementWinSize = 5
-parameters.cornerRefinementMaxIterations = 30
 
 # ================= SEARCH + DRIVE =================
-
 def search_and_drive():
-    marker_size = 140   # mm
-    STOP_BUFFER = 0.3
-    STOP_DISTANCE = 0.1
+    marker_size = 140      # mm
+    STOP_BUFFER = 0.3      # meters
+    driving = False
 
     while True:
         ret, frame = read_fn()
@@ -75,29 +68,46 @@ def search_and_drive():
         corners, ids, _ = aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
 
         if ids is not None and len(ids) > 0:
-            # Pose estimation
+            # Estimate pose
             rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(
                 corners, marker_size, camera_matrix, dist_coeffs
             )
-            tvec = tvecs[0][0]
+            rvec = rvecs[0]
+            tvec = tvecs[0][0]   # marker translation vector
 
-            # Compute angle and distance
-            angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))  # flip sign if needed
-            dist = tvec[2]/1000 - STOP_BUFFER
-            dist = max(dist, 0)  # avoid negative distance
+            # Compute forward vector to marker in camera frame
+            v = tvec / np.linalg.norm(tvec)      # unit vector to marker
+            beta = np.arccos(np.clip(np.dot(v, [0,0,1]), -1.0, 1.0))  # angle to forward axis
+            beta_deg = np.degrees(beta)
+
+            # Determine sign: left or right
+            if tvec[0] < 0:
+                beta_deg = -beta_deg
+
+            # Distance to marker (standoff)
+            distance = max(np.linalg.norm(tvec)/1000.0 - STOP_BUFFER, 0)
 
             print(f"Detected marker IDs: {ids.flatten()}")
-            print(f"tvec: {tvec}, angle: {angle:.2f}°, distance: {dist:.2f} m")
+            print(f"tvec: {tvec}, angle: {beta_deg:.2f}°, distance: {distance:.2f} m")
 
-            # Turn and move
-            calArlo.turn_angle(angle)
-            while dist > STOP_DISTANCE:
-                calArlo.drive(64, 64, calArlo.FORWARD, calArlo.FORWARD)
+            # Turn once toward marker
+            calArlo.turn_angle(beta_deg)
+
+            # Drive toward marker only if distance > 0
+            if distance > 0 and not driving:
+                calArlo.drive_distance(distance)
+                driving = True
+
+            if distance <= 0:
+                print("Reached marker!")
+                calArlo.stop()
+                break
         else:
             print("Searching for marker...")
             calArlo.drive(25, 25, calArlo.BACKWARD, calArlo.FORWARD)
             time.sleep(0.2)
             calArlo.stop()
+            driving = False
 
 try:
     search_and_drive()
