@@ -67,7 +67,7 @@ def scan_landmarks():
         return sorted(results, key=lambda r: r[3])  # nearest first
 
 try:
-    pts = scan_once()
+    pts = scan_landmarks()
     print(f"\n - landmarks (id, x[m], z[m], dist[m]):")
     if not pts:
         print(" (none)")
