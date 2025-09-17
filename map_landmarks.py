@@ -5,7 +5,7 @@
 import cv2
 import numpy as np
 import time
-from picamera2 import PiCamera2
+import PiCamera2
 from picamera.array import PiRGBArray
 from Exercise1.CalibratedRobot import CalibratedRobot  # adjust path if needed
 
