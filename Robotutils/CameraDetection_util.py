@@ -80,8 +80,7 @@ class ArucoUtils:
         dist = max(dist, 0)  # avoid negative distance
         return dist
     
-    def compute_rotation_to_marker(self, tvecs): #mærkelig formel lol
-            tvec = tvecs[0][0]
+    def compute_rotation_to_marker(self, tvec): #mærkelig formel lol
             # Compute angle
             angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))
             return angle
