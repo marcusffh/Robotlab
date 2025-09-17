@@ -3,7 +3,7 @@ import time, cv2, numpy as np
 from picamera2 import Picamera2
 
 # marker parameters
-F_PX          = 1275.26         # focal length [px] from calibration
+F_PX          = 1360.1         # focal length [px] from calibration
 MARKER_SIZE_M = 0.140           # marker side length [m]
 IMG_W, IMG_H  = 960, 720
 FPS           = 30
