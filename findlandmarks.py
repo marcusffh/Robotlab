@@ -13,11 +13,11 @@ import cv2
 
 # Import CalibratedRobot; ensure 'exercise1/__init__.py' exists. If not, use sys.path fallback.
 try:
-    from exercise1.CalibratedRobot import CalibratedRobot
+    from Exercise1.CalibratedRobot import CalibratedRobot
 except ModuleNotFoundError:
     import sys, os
     sys.path.append(os.path.join(os.path.dirname(__file__), "exercise1"))
-    from CalibratedRobot import CalibratedRobot
+    from Exercise1.CalibratedRobot import CalibratedRobot
 
 from aruco_utils import ArucoUtils
 
