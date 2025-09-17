@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Picamera2-only ArUco utilities using your working detector.
+# Picamera2-only ArUco utilities using your BGR + DICT_6X6_250 pipeline,
+# with small parameter tweaks to help detect smaller/farther tags.
 
 from __future__ import annotations
 from dataclasses import dataclass
@@ -16,19 +17,35 @@ class Intrinsics:
     fy: float
     cx: float
     cy: float
-    dist: np.ndarray  # not used in pixel-only mode; kept for future pose mode
+    dist: np.ndarray  # kept for future pose mode (not used in pixel-only path)
 
 
 class ArucoUtils:
-    def __init__(self, res: Tuple[int, int] = (960, 720), fps: int = 30):
+    def __init__(self, res: Tuple[int, int] = (640, 480), fps: int = 30):
+        # Lower res -> tag is larger in pixels at the same distance -> better detection far away
         self.res = res
         self.fps = fps
         self._picam2: Optional[Picamera2] = None
         self._started = False
 
-        # EXACTLY as in your working script:
         self._dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
-        self._params = cv2.aruco.DetectorParameters_create()
+        self._params = self._make_params()
+
+    @staticmethod
+    def _make_params() -> cv2.aruco.DetectorParameters:
+        p = cv2.aruco.DetectorParameters_create()
+        # More permissive for small/distant tags + stable corners
+        p.adaptiveThreshWinSizeMin = 5
+        p.adaptiveThreshWinSizeMax = 55
+        p.adaptiveThreshWinSizeStep = 5
+        p.adaptiveThreshConstant = 7
+        p.minMarkerPerimeterRate = 0.02
+        p.maxMarkerPerimeterRate = 4.0
+        p.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+        p.cornerRefinementWinSize = 5
+        p.cornerRefinementMaxIterations = 50
+        p.cornerRefinementMinAccuracy = 0.01
+        return p
 
     # ---------- Camera (Picamera2 only) ----------
     def start_camera(self) -> None:
@@ -44,7 +61,7 @@ class ArucoUtils:
         )
         cam.configure(cfg)
         cam.start()
-        time.sleep(0.8)  # same warm-up as your script
+        time.sleep(0.8)  # warm-up, as in your working script
         self._picam2 = cam
         self._started = True
 
@@ -62,12 +79,12 @@ class ArucoUtils:
             self._picam2 = None
         self._started = False
 
-    # ---------- Detection (your exact logic) ----------
+    # ---------- Detection (matches your working approach) ----------
     def detect_one(self, frame_bgr, restrict_id: Optional[int] = None):
         """
         Detect DICT_6X6_250 on BGR and return:
             { 'id': int, 'x_px': float, 'cx': float, 'w': int }
-        or None if not found. Chooses the largest by perimeter.
+        or None if not found. Chooses the largest by perimeter (stable).
         """
         aruco = cv2.aruco
         corners_list, ids, _ = aruco.detectMarkers(frame_bgr, self._dict, parameters=self._params)
@@ -80,8 +97,12 @@ class ArucoUtils:
             if restrict_id is not None and mid != restrict_id:
                 continue
             pts = c.reshape(-1, 2)  # TL, TR, BR, BL
-            per = (np.linalg.norm(pts[0]-pts[1]) + np.linalg.norm(pts[1]-pts[2]) +
-                   np.linalg.norm(pts[2]-pts[3]) + np.linalg.norm(pts[3]-pts[0]))
+            per = (
+                np.linalg.norm(pts[0] - pts[1])
+                + np.linalg.norm(pts[1] - pts[2])
+                + np.linalg.norm(pts[2] - pts[3])
+                + np.linalg.norm(pts[3] - pts[0])
+            )
             if best is None or per > best[0]:
                 best = (per, mid, pts)
 
@@ -106,7 +127,7 @@ class ArucoUtils:
     def forward_step(bot, meters: float, speed: Optional[int] = None) -> None:
         bot.drive_distance(meters, direction=bot.FORWARD, speed=speed)
 
-    # Back-compat alias if some scripts still call go_forward_step(...)
+    # Back-compat alias if any script calls go_forward_step(...)
     @staticmethod
     def go_forward_step(bot, meters: float, speed: Optional[int] = None) -> None:
         ArucoUtils.forward_step(bot, meters, speed)
