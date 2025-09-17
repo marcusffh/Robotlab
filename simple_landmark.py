@@ -1,36 +1,38 @@
-# find_landmark_smooth.py
+# find_landmark_boot_pulse_search.py
 import time, cv2, numpy as np
 import robot
 
-# ==== Camera / marker (same as your current working version) ====
+# ==== Camera / marker ====
 F_PX      = 1275.0
 MARKER_MM = 140.0
 TARGET_ID = None
 
 IMG_W, IMG_H, FPS  = 960, 720, 30
 
-# ==== Stop and align params ====
-STOP_AT_MM     = 420.0         # stop ~0.42 m from marker
-CENTER_DEADBAND_PX = 28        # ignore small center errors
-LOST_GRACE_FRAMES = 10         # keep coasting this many frames when lost
+# ==== Behavior ====
+STOP_AT_MM           = 420.0
+CENTER_DEADBAND_PX   = 28
+REQUIRED_HITS        = 2       # consecutive detections before leaving SEARCH
+LOST_GRACE_FRAMES    = 10
+LOST_TO_SEARCH       = 25
 
-# ==== Steering control ====
-BASE_PWR   = 60                # forward cruise power (>=40 per robot.py)
-MAX_PWR    = 100               # cap (<=127 per robot.py)
-MIN_PWR    = 40                # never go below 40 (or 0)
-Kp_far     = 0.10              # deg/pixel-ish scaling into power delta (far)
-Kp_near    = 0.06              # gentler steering when close
-MAX_STEER  = 24                # max |delta power| applied to one side
-EMA_ALPHA  = 0.35              # smoothing for center error
+# ==== Motion / control (DRIVE stays as you liked it) ====
+TURN_PWR   = 50                # power for in-place spin
+BASE_PWR   = 60                # forward cruise power
+MAX_PWR    = 100; MIN_PWR = 40
+Kp_far     = 0.10; Kp_near = 0.06
+MAX_STEER  = 24
+EMA_ALPHA  = 0.35
 
-# ==== Robot + camera ====
-arlo = robot.Robot()
+# ==== SEARCH pulse-timing (new) ====
+TURN_PULSE_DT = 0.10           # rotate for 100 ms
+SNAP_DT       = 0.06           # stop for 60 ms to capture a sharp frame
 
 def clamp_power(p):
     if p <= 0: return 0
     return max(MIN_PWR, min(MAX_PWR, int(round(p))))
 
-# --- your camera + detection helpers (unchanged) ---
+# ==== Camera ====
 def make_camera(width=IMG_W, height=IMG_H, fps=FPS):
     try:
         from picamera2 import Picamera2
@@ -55,36 +57,32 @@ def make_camera(width=IMG_W, height=IMG_H, fps=FPS):
                     f"video/x-raw, width=(int){w}, height=(int){h}, framerate=(fraction){f}/1 ! "
                     "videoconvert ! appsink")
         cap = cv2.VideoCapture(gst(width, height, fps), cv2.CAP_GSTREAMER)
-        if not cap.isOpened():
-            raise RuntimeError(f"Camera init failed: {e}")
+        if not cap.isOpened(): raise RuntimeError(f"Camera init failed: {e}")
         def read_fn(): return cap.read()
         def release_fn():
             try: cap.release()
             except: pass
         return read_fn, release_fn
 
+# ==== Detection ====
 def detect_marker(frame_bgr, restrict_id=None):
     aruco = cv2.aruco
-    dictionary = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
+    dictionary = aruco.getPredefinedDictionary(aruco.DICT_6X_6_250)  # OpenCV constant name
     params     = aruco.DetectorParameters_create()
     corners, ids, _ = aruco.detectMarkers(frame_bgr, dictionary, parameters=params)
-    if ids is None or len(corners) == 0:
-        return None
-    best = None
+    if ids is None or len(corners) == 0: return None
+    best=None
     for c, mid in zip(corners, ids.flatten()):
-        if restrict_id is not None and int(mid) != restrict_id:
-            continue
+        if restrict_id is not None and int(mid) != restrict_id: continue
         pts = c.reshape(-1,2)
         per = (np.linalg.norm(pts[0]-pts[1]) + np.linalg.norm(pts[1]-pts[2]) +
                np.linalg.norm(pts[2]-pts[3]) + np.linalg.norm(pts[3]-pts[0]))
-        if best is None or per > best[0]:
-            best = (per, int(mid), pts)
+        if best is None or per > best[0]: best = (per, int(mid), pts)
     if best is None: return None
     _, mid, pts = best
     TL, TR, BR, BL = pts
-    v1 = np.linalg.norm(TL - BL)
-    v2 = np.linalg.norm(TR - BR)
-    x_px = 0.5*(v1+v2)
+    v1 = np.linalg.norm(TL - BL); v2 = np.linalg.norm(TR - BR)
+    x_px = 0.5*(v1+v2)  # size proxy
     cx   = float((TL[0]+TR[0]+BR[0]+BL[0]) / 4.0)
     h, w = frame_bgr.shape[:2]
     return {"id": mid, "x_px": float(x_px), "cx": cx, "w": w}
@@ -92,66 +90,85 @@ def detect_marker(frame_bgr, restrict_id=None):
 def estimate_Z_mm(x_px, f_px=F_PX, X_mm=MARKER_MM):
     return (f_px * X_mm) / max(x_px, 1e-6)
 
-# ==== Main loop with smooth steering ====
+# ==== Main ====
+arlo = robot.Robot()
 read, release = make_camera()
-err_filt = 0.0
+
+SEARCH, DRIVE = 0, 1
+state = SEARCH
+hits = 0
 lost_frames = 0
+err_filt = 0.0
 
 try:
-    # start rolling slowly (helps reduce startup twitch)
-    arlo.go_diff(BASE_PWR, BASE_PWR, 1, 1)
+    # Start stationary
+    arlo.stop()
 
     while True:
+        # ----- SEARCH: rotate -> stop -> capture -> repeat -----
+        if state == SEARCH:
+            # rotate in place for a short pulse
+            arlo.go_diff(TURN_PWR, TURN_PWR, 0, 1)  # rotate left on center
+            time.sleep(TURN_PULSE_DT)
+            # stop and give the camera a still moment
+            arlo.stop()
+            time.sleep(SNAP_DT)
+
+        # Capture a frame (works for both SEARCH and DRIVE)
         ok, frame = read()
         if not ok:
-            # keep previous command; try next frame
+            # if frame hiccup, just loop; SEARCH pulses will continue
             continue
 
         det = detect_marker(frame, restrict_id=TARGET_ID)
 
-        if det is None:
-            # Grace period: keep last steering and count lost frames
-            lost_frames += 1
-            if lost_frames > LOST_GRACE_FRAMES:
-                # gentle search while moving: slight left bias
-                L = clamp_power(BASE_PWR - 8)
-                R = clamp_power(BASE_PWR + 8)
-                arlo.go_diff(L, R, 1, 1)
+        if state == SEARCH:
+            if det is None:
+                hits = 0
+                continue
+            hits += 1
+            if hits < REQUIRED_HITS:
+                continue
+            # lock on: switch to DRIVE (do NOT modify your drive behavior)
+            state = DRIVE
+            lost_frames = 0
+            err_filt = 0.0
+            # begin driving forward smoothly
+            arlo.go_diff(BASE_PWR, BASE_PWR, 1, 1)
             continue
 
-        # reset lost counter on sight
+        # ----- DRIVE (unchanged smooth controller you liked) -----
+        if det is None:
+            lost_frames += 1
+            if lost_frames > LOST_TO_SEARCH:
+                arlo.stop()
+                state = SEARCH
+                hits = 0
+            # else: keep last speeds (coast)
+            continue
+
         lost_frames = 0
 
-        # center error (pixels): negative = marker left of image center
+        # steering around center while moving
         err = det["cx"] - (det["w"] * 0.5)
-        # low-pass filter the error
         err_filt = (1.0 - EMA_ALPHA) * err_filt + EMA_ALPHA * err
 
-        # distance estimate for gain scheduling
         Z_mm = estimate_Z_mm(det["x_px"])
-        Kp = Kp_near if Z_mm < 800.0 else Kp_far  # gentler when we’re closer
+        Kp = Kp_near if Z_mm < 800.0 else Kp_far
 
-        # apply deadband
         if abs(err_filt) < CENTER_DEADBAND_PX:
             steer = 0.0
         else:
-            steer = np.clip(Kp * err_filt, -MAX_STEER, MAX_STEER)
+            steer = float(np.clip(Kp * err_filt, -MAX_STEER, MAX_STEER))
 
-        # convert steer to differential power (note sign: err>0 => marker right => steer right)
         L = clamp_power(BASE_PWR + steer)
         R = clamp_power(BASE_PWR - steer)
+        arlo.go_diff(L, R, 1, 1)
 
-        # drive forward with steering; no stop/turn twitching
-        arlo.go_diff(L, R, 1, 1)  # forward both, different speeds
-
-        # stop condition
         if Z_mm <= STOP_AT_MM:
             arlo.stop()
             print(f"Done: centered and ~{Z_mm:.0f} mm away (ID={det['id']}).")
             break
-
-        # small sleep to keep loop tame (optional; 30 FPS is fine without)
-        # time.sleep(0.005)
 
 finally:
     try: release()
