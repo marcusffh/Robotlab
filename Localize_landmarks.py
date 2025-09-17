@@ -61,8 +61,9 @@ def make_camera(width=960, height=720, fps=30):
     
     
 read_fn, release_fn = make_camera()
-
 def search_and_drive():
+    marker_size = 105   
+
     while True:
         ret, frame = read_fn()
         if not ret:
@@ -72,26 +73,46 @@ def search_and_drive():
         corners, ids, _ = aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
 
         if ids is not None:
+            # Draw detected markers
+            aruco.drawDetectedMarkers(frame, corners, ids)
+
+            # Pose estimation
             rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(
-                corners, 100, camera_matrix, dist_coeffs)  # marker size = 100 mm
+                corners, marker_size, camera_matrix, dist_coeffs
+            )
             tvec = tvecs[0][0]  # (x, y, z) in mm
 
-            print("Marker at:", tvec)
+            # Draw axis for first marker
+            aruco.drawAxis(frame, camera_matrix, dist_coeffs, rvecs[0], tvecs[0], marker_size/2)
 
-            # Angle + distance
+            # Compute angle and distance
             angle = np.degrees(np.arctan2(tvec[0], tvec[2]))
-            dist = tvec[2] / 1000.0  # mm → meters
+            dist = tvec[2] / 1000.0  # convert mm → meters
 
+            # Debug info
+            print(f"Detected marker IDs: {ids.flatten()}")
+            print(f"tvec: {tvec}, angle: {angle:.2f}°, distance: {dist:.2f} m")
+
+            # Turn toward marker
             calArlo.turn_angle(angle)
-            calArlo.drive_distance(dist)
 
+            # Move forward (limit step to avoid overshooting)
+            calArlo.drive_distance(min(dist, 0.3))
+
+            # Stop if close enough
             if dist < 0.2:
                 print("Reached landmark!")
                 break
         else:
+            print("Searching for marker...")
             calArlo.drive(50, 50, calArlo.BACKWARD, calArlo.FORWARD)
             time.sleep(0.2)
             calArlo.stop()
+
+        # Show the camera feed
+        cv2.imshow("Arlo Camera Feed", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
 
 try:
