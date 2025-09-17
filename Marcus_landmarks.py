@@ -19,7 +19,7 @@ aruco = ArucoUtils()
 def drive_to_landmark():
     isDriving = False
     STOP_BUFFER = 0.2
-    dist 
+
     while True:
         frame = cam.get_frame()
         corners, ids = aruco.detect_markers(frame)
