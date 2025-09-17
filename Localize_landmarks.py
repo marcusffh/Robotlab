@@ -67,7 +67,6 @@ def search_and_drive():
         corners, ids, _ = aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
 
         if ids is not None and len(ids) > 0:
-            driving = True
             # Pose estimation
             rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(
                 corners, marker_size, camera_matrix, dist_coeffs
@@ -96,6 +95,7 @@ def search_and_drive():
             # Turn and move
             calArlo.turn_angle(angle)
             if dist > 0 and not driving:
+                driving = True
                 calArlo.drive_distance(dist)
 
             if dist <= 0:
