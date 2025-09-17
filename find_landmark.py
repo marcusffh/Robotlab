@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-find_landmark_arlo.py — continuous search + local recover (no 360)
-------------------------------------------------------------------
+find_landmark_arlo.py — slow duty-cycled search + local recover (no 360)
+------------------------------------------------------------------------
 States:
-  SEARCH  : slow continuous rotation, read camera every frame
-  ALIGN   : micro-rotate to center marker (pixel deadband)
+  SEARCH  : very slow rotation via duty cycle, reading camera every frame
+  ALIGN   : gentle micro-rotations to center the marker (deadband)
   APPROACH: short forward steps with smoothed heading correction
   RECOVER : small oscillating turns toward last-seen side until reacquired
-  DONE    : stop at standoff
+  DONE    : stop at stand-off distance
 
 Controls:
-  Ctrl-C          -> safe stop
-  type 'q'+Enter  -> safe stop (over SSH)
+  - Ctrl-C          -> safe stop
+  - type 'q' + Enter -> safe stop (works over SSH)
 
 Requires:
   - robot.py (Robot.go_diff(...), Robot.stop())
-  - OpenCV (aruco), picamera2 preferred, GStreamer fallback
+  - OpenCV with aruco, picamera2 preferred (GStreamer fallback)
 """
 
 import time, sys, signal, select
@@ -24,34 +24,38 @@ import numpy as np
 # ===== Camera / marker =====
 F_PX        = 1275.0     # calibrated focal length (px)
 MARKER_MM   = 140.0      # marker height (mm)
-TARGET_ID   = None       # lock to specific ArUco id (e.g. 6), or None
+TARGET_ID   = None       # lock to specific ArUco id (e.g., 6), or None
 
 # ===== Drive / calibration =====
 MIN_PWR     = 40
 MAX_PWR     = 127
-CAL_KL      = 0.98       # your tuned scales
-CAL_KR      = 1.00
+CAL_KL      = 0.98       # tuned scales (left)
+CAL_KR      = 1.00       # tuned scales (right)
 
 # ===== Behavior tuning =====
-SEARCH_PWR      = 25     # slow rotation power
+# SEARCH: use duty-cycled spin for truly slow rotation
+SEARCH_PWR      = 44     # power while "on" (must be >= MIN_PWR if > 0)
 SEARCH_DIR      = +1     # +1 spin right, -1 spin left
+SPIN_PERIOD_MS  = 350    # total on+off period (ms)
+SPIN_DUTY       = 0.22   # fraction of period spinning (0.22 ≈ 22% ON)
 
-TURN_PWR        = 50     # align pulse power
+# ALIGN & APPROACH
+TURN_PWR        = 42     # min safe power, gentle micro-turns
+ALIGN_PULSE_MS  = 90     # slightly longer for smoothness
 DRIVE_PWR       = 58     # forward step power
-PX_TOL          = 28     # deadband around image center (px)
-Kp              = 0.0009 # px -> steering bias
+PX_TOL          = 30     # deadband around image center (px)
+Kp              = 0.0008 # px -> steering bias (gentle)
 BASE_BIAS       = -0.06  # cancels left drift
-EMA_ALPHA       = 0.30   # smoothing for pixel error
+EMA_ALPHA       = 0.30   # smoothing for pixel error (0..1)
 
-STEP_MS         = 180    # forward step duration
+STEP_MS         = 160    # forward step duration (short = stable)
 STOP_AT_MM      = 450.0  # stop distance
 LOST_LIMIT      = 8      # frames without detection -> lost
 
-# RECOVER (local search, no 360)
-REC_PWR         = 46           # recovery turning power
-REC_PULSE_MS    = 120          # a single recovery pulse
-REC_MAX_PULSES  = 20           # max pulses before giving up to SEARCH
-REC_BIAS_INC    = 1            # expand pattern by flipping direction after each pulse
+# RECOVER (local search, NO 360)
+REC_PWR         = 44           # recovery turning power (slow)
+REC_PULSE_MS    = 110          # single recovery pulse
+REC_MAX_PULSES  = 24           # cap before falling back to SEARCH
 
 # ===== Safe abort =====
 ABORT = False
@@ -149,8 +153,10 @@ def scaled_lr(pl, pr):
 def spin_continuous(arlo, power, dir_sign):
     power = max(MIN_PWR, min(MAX_PWR, int(power)))
     L,R = scaled_lr(power, power)
-    if dir_sign >= 0: arlo.go_diff(L, R, 1, 0)
-    else:             arlo.go_diff(L, R, 0, 1)
+    if dir_sign >= 0: arlo.go_diff(L, R, 1, 0)  # right spin
+    else:             arlo.go_diff(L, R, 0, 1)  # left spin
+
+def stop(arlo): arlo.stop()
 
 def spin_pulse(arlo, power, dir_sign, ms):
     spin_continuous(arlo, power, dir_sign)
@@ -164,7 +170,32 @@ def drive_step_with_bias(arlo, base_power, bias, ms):
     arlo.go_diff(L, R, 1, 1)
     time.sleep(ms/1000.0); arlo.stop()
 
-def stop(arlo): arlo.stop()
+# ===== Duty-cycled slow spin =====
+_spin_state = {"on": False, "t0": 0.0}
+def spin_pwm_step(arlo, power, dir_sign, period_ms=SPIN_PERIOD_MS, duty=SPIN_DUTY):
+    """
+    Toggle between spinning and stopped within each period so the average
+    angular speed is much slower, while still reading the camera every loop.
+    """
+    now = time.time()
+    if _spin_state["t0"] == 0.0:
+        _spin_state["t0"] = now
+        _spin_state["on"] = False
+
+    elapsed = (now - _spin_state["t0"]) * 1000.0
+    on_ms   = duty * period_ms
+    off_ms  = (1.0 - duty) * period_ms
+
+    if _spin_state["on"]:
+        if elapsed >= on_ms:
+            stop(arlo)
+            _spin_state["on"] = False
+            _spin_state["t0"] = now
+    else:
+        if elapsed >= off_ms:
+            spin_continuous(arlo, power, dir_sign)
+            _spin_state["on"] = True
+            _spin_state["t0"] = now
 
 # ===== Main =====
 def main():
@@ -175,10 +206,10 @@ def main():
     state = "SEARCH"
     lost = 0
     err_filt = 0.0
-    last_err_sign = +1   # +1 means marker was last seen on right; -1 on left
-    rec_pulses = 0       # pulses used in RECOVER (to flip small directions)
+    last_err_sign = +1   # +1 = last seen to the right; -1 = left
+    rec_pulses = 0
 
-    print("SM: SEARCH -> ALIGN -> APPROACH -> (RECOVER on loss) -> DONE")
+    print("SM: SEARCH (duty) -> ALIGN -> APPROACH -> RECOVER(no 360) -> DONE")
     try:
         while True:
             if ABORT or user_requested_quit():
@@ -188,39 +219,34 @@ def main():
             if not ok:
                 time.sleep(0.01); continue
 
-            # ===== SEARCH: continuous slow rotation, read each frame =====
+            # ===== SEARCH: very slow via duty-cycle, read camera every frame =====
             if state == "SEARCH":
-                spin_continuous(arlo, SEARCH_PWR, SEARCH_DIR)
+                spin_pwm_step(arlo, SEARCH_PWR, SEARCH_DIR)  # << slow spin
                 det = detect_marker(frame, restrict_id=TARGET_ID)
                 if det is None:
                     continue
                 stop(arlo)
                 state = "ALIGN"
                 lost = 0
-                # fall through with det available
+                # fall through with det
             else:
                 det = detect_marker(frame, restrict_id=TARGET_ID)
 
-            # ===== handle detection / loss =====
+            # ===== detection / loss handling =====
             if det is None:
                 lost += 1
                 if state in ("ALIGN","APPROACH"):
                     if lost >= LOST_LIMIT:
-                        # enter local RECOVER using last_err_sign (no 360)
                         state = "RECOVER"
                         rec_pulses = 0
                         stop(arlo)
                         continue
-                    # keep looping; maybe next frame sees it again
                     continue
                 elif state == "RECOVER":
-                    # if we’re already recovering, we execute below
                     pass
                 else:
-                    # e.g., still in SEARCH without detection -> loop
                     continue
             else:
-                # update last side where we saw the marker
                 x_px, cx, w = det["x_px"], det["cx"], det["w"]
                 Z = estimate_Z_mm(x_px)
                 err = cx - (w/2.0)
@@ -232,8 +258,7 @@ def main():
                 if abs(err) <= PX_TOL:
                     state = "APPROACH"
                     continue
-                # micro pulses toward error sign
-                spin_pulse(arlo, TURN_PWR, +1 if err>0 else -1, 60)
+                spin_pulse(arlo, TURN_PWR, +1 if err>0 else -1, ALIGN_PULSE_MS)
                 continue
 
             if state == "APPROACH":
@@ -249,20 +274,14 @@ def main():
                 continue
 
             if state == "RECOVER":
-                # small oscillating local search around last seen side
-                # pattern: try a short pulse toward last_err_sign, check; if still none, flip side, slightly expand
+                # small oscillating local search around last seen side (no 360)
                 dir_sign = last_err_sign if (rec_pulses % 2 == 0) else -last_err_sign
                 spin_pulse(arlo, REC_PWR, dir_sign, REC_PULSE_MS)
 
-                # check camera right after the pulse
                 ok2, frame2 = read_fn()
-                if ok2:
-                    det2 = detect_marker(frame2, restrict_id=TARGET_ID)
-                else:
-                    det2 = None
+                det2 = detect_marker(frame2, restrict_id=TARGET_ID) if ok2 else None
 
                 if det2 is not None:
-                    # reacquired -> ALIGN
                     x_px, cx, w = det2["x_px"], det2["cx"], det2["w"]
                     err = cx - (w/2.0)
                     last_err_sign = +1 if err>0 else -1
@@ -273,12 +292,9 @@ def main():
 
                 rec_pulses += 1
                 if rec_pulses >= REC_MAX_PULSES:
-                    # give up and go back to SEARCH (still no 360)
                     stop(arlo)
                     state = "SEARCH"
                     continue
-
-                # otherwise keep oscillating locally
                 continue
 
     except KeyboardInterrupt:
