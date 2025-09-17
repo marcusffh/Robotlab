@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Picamera2-only ArUco utilities using your BGR + DICT_6X6_250 pipeline,
-# with small parameter tweaks to help detect smaller/farther tags.
+# Picamera2-only ArUco utilities using BGR + DICT_6X6_250 (no grayscale).
+# Tuned for far detection (high resolution + permissive detector params).
 
 from __future__ import annotations
 from dataclasses import dataclass
@@ -17,12 +17,12 @@ class Intrinsics:
     fy: float
     cx: float
     cy: float
-    dist: np.ndarray  # kept for future pose mode (not used in pixel-only path)
+    dist: np.ndarray  # kept for potential future pose mode
 
 
 class ArucoUtils:
-    def __init__(self, res: Tuple[int, int] = (640, 480), fps: int = 30):
-        # Lower res -> tag is larger in pixels at the same distance -> better detection far away
+    def __init__(self, res: Tuple[int, int] = (1640, 1232), fps: int = 30):
+        # High resolution -> more pixels on the tag at distance
         self.res = res
         self.fps = fps
         self._picam2: Optional[Picamera2] = None
@@ -34,7 +34,7 @@ class ArucoUtils:
     @staticmethod
     def _make_params() -> cv2.aruco.DetectorParameters:
         p = cv2.aruco.DetectorParameters_create()
-        # More permissive for small/distant tags + stable corners
+        # More permissive thresholds for small/far tags + stable corners
         p.adaptiveThreshWinSizeMin = 5
         p.adaptiveThreshWinSizeMax = 55
         p.adaptiveThreshWinSizeStep = 5
@@ -61,7 +61,7 @@ class ArucoUtils:
         )
         cam.configure(cfg)
         cam.start()
-        time.sleep(0.8)  # warm-up, as in your working script
+        time.sleep(0.8)  # warm-up like your working script
         self._picam2 = cam
         self._started = True
 
@@ -127,7 +127,7 @@ class ArucoUtils:
     def forward_step(bot, meters: float, speed: Optional[int] = None) -> None:
         bot.drive_distance(meters, direction=bot.FORWARD, speed=speed)
 
-    # Back-compat alias if any script calls go_forward_step(...)
+    # Back-compat alias (if other scripts used this name)
     @staticmethod
     def go_forward_step(bot, meters: float, speed: Optional[int] = None) -> None:
         ArucoUtils.forward_step(bot, meters, speed)
