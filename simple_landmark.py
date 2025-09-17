@@ -1,34 +1,57 @@
-import cv2, time
-import numpy as np
+# find_landmark_min.py  — minimal ArUco chase
+import time, cv2, numpy as np
 from picamera2 import Picamera2
 import robot
 
-# Init robot + camera
+# --- tiny config (tune if needed) ---
+IMG_W, IMG_H = 640, 480
+CENTER_TOL_PIX = 40      # how close to center before driving forward
+STOP_PIX = 140           # stop when marker height (px) >= this
+TURN_PWR, FWD_PWR = 40, 64   # per robot.py: >=40 except 0
+
+# --- init robot + camera ---
 arlo = robot.Robot()
 cam = Picamera2()
-cfg = cam.create_video_configuration({"size": (640,480), "format":"RGB888"})
+cfg = cam.create_video_configuration({"size": (IMG_W, IMG_H), "format": "RGB888"})
 cam.configure(cfg); cam.start(); time.sleep(1)
 
-# ArUco setup
+# --- aruco setup ---
 aruco = cv2.aruco
-dict6x6 = aruco.Dictionary_get(aruco.DICT_6X6_250)
-params = aruco.DetectorParameters_create()
+DICT = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
+PARAMS = aruco.DetectorParameters_create()
 
-while True:
-    frame = cam.capture_array("main")
-    corners, ids, _ = aruco.detectMarkers(frame, dict6x6, parameters=params)
+def step(cmd, dt=0.12):
+    # cmd: 'L','R','F' for left/right/forward step
+    if cmd == 'L': arlo.go_diff(TURN_PWR, TURN_PWR, 0, 1)
+    if cmd == 'R': arlo.go_diff(TURN_PWR, TURN_PWR, 1, 0)
+    if cmd == 'F': arlo.go_diff(FWD_PWR, FWD_PWR, 1, 1)
+    time.sleep(dt); arlo.stop()
 
-    if ids is None:  # spin until marker seen
-        arlo.go_diff(50, 50, 0, 1); time.sleep(0.1); arlo.stop()
-        continue
+try:
+    while True:
+        frame = cam.capture_array("main")
+        corners, ids, _ = aruco.detectMarkers(frame, DICT, parameters=PARAMS)
 
-    # Marker center
-    c = corners[0][0]
-    cx = int(np.mean(c[:,0])); mid = frame.shape[1]//2
-    if abs(cx-mid) > 40:  # rotate until centered
-        if cx < mid: arlo.go_diff(40,40,0,1)
-        else:        arlo.go_diff(40,40,1,0)
-        time.sleep(0.1); arlo.stop()
-    else:  # drive forward
-        arlo.go_diff(60,60,1,1); time.sleep(0.3); arlo.stop()
-        break
+        if ids is None or len(ids) == 0:
+            step('L')             # slow spin until we see a marker
+            continue
+
+        c = corners[0][0]         # use the first/strongest marker
+        cx = int(np.mean(c[:,0]))
+        mid = IMG_W // 2
+        # estimate marker height in pixels from an edge (top-left -> bottom-left)
+        hpx = int(np.linalg.norm(c[0] - c[3]))
+
+        # 1) center horizontally
+        if abs(cx - mid) > CENTER_TOL_PIX:
+            step('L' if cx < mid else 'R')
+            continue
+
+        # 2) drive forward until marker looks "big enough", then stop
+        if hpx < STOP_PIX:
+            step('F', 0.20 if hpx < STOP_PIX*0.8 else 0.12)
+        else:
+            print(f"Done: centered and close (height≈{hpx}px).")
+            break
+finally:
+    arlo.stop()
