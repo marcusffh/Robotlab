@@ -2,16 +2,23 @@
 """
 find_landmarks.py
 -----------------
-Duty-cycled “stop-to-look” SEARCH + default ArUco detector (BGR, DICT_6X6_250).
-Verbose prints while searching, when found, and while moving toward the tag.
-Uses your CalibratedRobot API (turn_angle, drive_distance, stop).
+Locate an ArUco, align, and drive straight toward it using ONLY CalibratedRobot
+(turn_angle, drive_distance, stop). No raw wheel power -> no right-veer.
+
+Behavior:
+  SEARCH  : small rotate pulse, STOP, read camera (no blur).
+  ALIGN   : micro turns (deadband) using sign-correct mapping.
+  APPROACH: alternate (tiny correction -> straight forward step).
+  DONE    : stop when Z (from x_px) <= STOP_AT_MM.
+
+Prints clearly while searching, when found, and while moving.
 """
 
 import time
 import numpy as np
 import cv2
 
-# Import CalibratedRobot; ensure exercise1/__init__.py exists.
+# ---- Bring in your robot class ----
 try:
     from Exercise1.CalibratedRobot import CalibratedRobot
 except ModuleNotFoundError:
@@ -21,54 +28,60 @@ except ModuleNotFoundError:
 
 from aruco_utils import ArucoUtils
 
-# ---- Camera/marker calibration (from Part 1) ----
-F_PX      = 1275.0           # focal length (px)
-MARKER_MM = 140.0            # 14 cm marker
-TARGET_ID = None             # set to an int to lock a specific id
+# ---- Camera / marker calibration ----
+F_PX      = 1275.0          # focal length (px)
+MARKER_MM = 140.0           # 14 cm tag
+TARGET_ID = None            # set to an int to lock to a specific id
 
-# ---- Behavior tuning (angles/steps; stop-to-look) ----
-SEARCH_STEP_DEG = 8.0        # small rotate pulse, then stop & check
-SEARCH_SLEEP_S  = 0.06       # short settle after each pulse
+# ---- Search / align tuning ----
+SEARCH_STEP_DEG = 8.0       # small rotate pulse (stop-to-look)
+SEARCH_SLEEP_S  = 0.06
 
-PX_TOL              = 30     # center deadband (px)
-PX_KP_DEG_PER_PX    = 0.05   # map pixel error -> degrees
+PX_TOL              = 30    # deadband around center (pixels)
+PX_KP_DEG_PER_PX    = 0.05  # << SIGN MATTERS: positive err (marker RIGHT) => need RIGHT turn (NEG degrees)
 MAX_ALIGN_STEP_DEG  = 10.0
 
-STOP_AT_MM          = 450.0  # stand-off distance (mm)
-STEP_MIN_M          = 0.08   # min forward step (m)
-STEP_MAX_M          = 0.35   # max forward step (m)
-STEP_SCALE          = 0.6    # step = clamp((Z-STOP)/1000 * SCALE, MIN, MAX)
+# ---- Forward-step policy (distance-aware) ----
+STOP_AT_MM          = 450.0 # stand-off distance
+STEP_MIN_M          = 0.08
+STEP_MAX_M          = 0.35
+STEP_SCALE          = 0.6   # step = clamp((Z-STOP)/1000 * SCALE, MIN, MAX)
 
-LOST_LIMIT          = 12     # tolerate brief dropouts
+# ---- Robustness ----
+LOST_LIMIT          = 12
 LOOP_SLEEP_S        = 0.04
 
 def estimate_Z_mm(x_px, f_px=F_PX, X_mm=MARKER_MM) -> float:
-    # Z = f*X/x
+    # Pinhole: Z = f * X / x
     return (f_px * X_mm) / max(x_px, 1e-6)
 
 def choose_turn_deg(err_px: float) -> float:
-    return float(np.clip(err_px * PX_KP_DEG_PER_PX, -MAX_ALIGN_STEP_DEG, MAX_ALIGN_STEP_DEG))
+    """
+    err_px = cx - (w/2). Positive -> marker is to the RIGHT of center.
+    To center, we must turn RIGHT => NEGATIVE angle for CalibratedRobot.turn_angle.
+    """
+    step = -(err_px * PX_KP_DEG_PER_PX)
+    return float(np.clip(step, -MAX_ALIGN_STEP_DEG, MAX_ALIGN_STEP_DEG))
 
 def choose_step_m(Z_mm: float) -> float:
-    remaining = max(0.0, Z_mm - STOP_AT_MM) / 1000.0  # -> meters
+    remaining = max(0.0, Z_mm - STOP_AT_MM) / 1000.0  # meters
     step = remaining * STEP_SCALE
     return float(np.clip(step, STEP_MIN_M, STEP_MAX_M))
 
 def main():
     bot = CalibratedRobot()
 
-    # Camera matches your successful path: 960x720 main (sensor still runs 1640x1232)
+    # Camera matches what worked for you (Picamera2 BGR, default params)
     aru = ArucoUtils(res=(960, 720), fps=30)
     aru.start_camera()
 
-    state = "SEARCH"
-    lost  = 0
-    need_turn = True  # in APPROACH: alternate micro turn -> forward step
+    state     = "SEARCH"
+    lost      = 0
+    need_turn = True   # in APPROACH: alternate tiny turn -> forward step
 
-    print("find_landmarks: SEARCH → ALIGN → APPROACH → DONE (duty-cycled search)")
+    print("find_landmarks: SEARCH → ALIGN → APPROACH → DONE (no raw wheel control)")
     try:
         while True:
-            # Read a frame
             ok, frame = aru.read()
             if not ok:
                 bot.stop()
@@ -81,12 +94,11 @@ def main():
             if state == "SEARCH":
                 print(f"[SEARCH] rotate {SEARCH_STEP_DEG:.1f}° then check…")
                 if det is None:
-                    # small rotate pulse using your calibrated turn (then stop & look)
-                    ArucoUtils.rotate_step(bot, SEARCH_STEP_DEG)
+                    ArucoUtils.rotate_step(bot, SEARCH_STEP_DEG)  # small left pulse
                     time.sleep(SEARCH_SLEEP_S)
                     continue
 
-                # Found something — print and move to ALIGN
+                # Found
                 x_px, cx, w = det["x_px"], det["cx"], det["w"]
                 err_px = cx - (w * 0.5)
                 Z_mm   = estimate_Z_mm(x_px)
@@ -94,7 +106,7 @@ def main():
                 state = "ALIGN"; lost = 0
                 continue
 
-            # Common loss handling
+            # -------- LOSS HANDLING --------
             if det is None:
                 lost += 1
                 print(f"[LOST] no detection ({lost}/{LOST_LIMIT})")
@@ -107,7 +119,7 @@ def main():
 
             # Parse detection
             cx, w = det["cx"], det["w"]
-            err_px = cx - (w * 0.5)      # + -> marker right of center
+            err_px = cx - (w * 0.5)    # +: marker right of center
             x_px   = det["x_px"]
             Z_mm   = estimate_Z_mm(x_px)
 
@@ -117,15 +129,14 @@ def main():
                     print(f"[ALIGN→APPROACH] centered; Z≈{Z_mm:.0f} mm")
                     state = "APPROACH"; need_turn = True
                 else:
-                    turn_deg = choose_turn_deg(err_px)
+                    turn_deg = choose_turn_deg(err_px)  # NEG when marker is right -> turn right
                     print(f"[ALIGN] err={err_px:.1f}px → turn {turn_deg:.1f}°")
                     ArucoUtils.rotate_step(bot, turn_deg)
                     time.sleep(SEARCH_SLEEP_S)
                 continue
 
-            # -------- APPROACH --------
+            # -------- APPROACH (no raw motor bias; straight-step via CalibratedRobot) --------
             if state == "APPROACH":
-                # Stop by *distance* (robust vs pixel-size)
                 if Z_mm <= STOP_AT_MM:
                     bot.stop()
                     print(f"[DONE] close enough: Z≈{Z_mm:.0f} mm (≤ {STOP_AT_MM:.0f} mm)")
@@ -141,7 +152,7 @@ def main():
 
                 step_m = choose_step_m(Z_mm)
                 print(f"[MOVE] forward {step_m:.2f} m (Z≈{Z_mm:.0f} mm)")
-                ArucoUtils.forward_step(bot, step_m)
+                ArucoUtils.forward_step(bot, step_m)  # straight, balanced via your CalibratedRobot
                 need_turn = True
                 time.sleep(SEARCH_SLEEP_S)
                 continue
