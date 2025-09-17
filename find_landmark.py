@@ -49,7 +49,7 @@ ALIGN_PULSE_MS  = 90
 PX_TOL          = 30       # center deadband (px)
 
 # TRACK_DRIVE (smooth, no jerks)
-BASE_BIAS       = -0.06    # cancels systematic left drift
+BASE_BIAS       = 0.00   # cancels systematic left drift
 EMA_ALPHA       = 0.30     # low-pass for pixel error
 Kp              = 0.0008   # proportional steering gain (px -> bias)
 Ki              = 0.00002  # tiny integral term for slow residual bias
