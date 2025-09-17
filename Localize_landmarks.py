@@ -53,11 +53,19 @@ dist_coeffs = np.zeros((5, 1))
 aruco_dict = aruco.Dictionary_get(aruco.DICT_6X6_250)
 parameters = aruco.DetectorParameters_create()
 
+# ----- Tuning parameters for longer distance detection -----
+parameters.adaptiveThreshWinSizeMin = 3
+parameters.adaptiveThreshWinSizeMax = 23
+parameters.adaptiveThreshWinSizeStep = 5
+parameters.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+parameters.cornerRefinementWinSize = 5
+parameters.cornerRefinementMaxIterations = 30
+
 # ================= SEARCH + DRIVE =================
 def search_and_drive():
     marker_size = 140   # mm
-    STOP_BUFFER = 0.3
-    STOP_DISTANCE = 0.2
+    STOP_DISTANCE = 0.2 # meters
+    STEP_DISTANCE = 0.2 # meters per move step
 
     while True:
         ret, frame = read_fn()
@@ -68,24 +76,24 @@ def search_and_drive():
         corners, ids, _ = aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
 
         if ids is not None and len(ids) > 0:
-            # Pose estimation
             rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(
                 corners, marker_size, camera_matrix, dist_coeffs
             )
             tvec = tvecs[0][0]
 
-            # Compute angle and distance
-            angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))  # flip sign if needed
-            dist = tvec[2]/1000 - STOP_BUFFER
-            dist = max(dist, 0)  # avoid negative distance
+            angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))
+            dist = tvec[2]/1000  # meters
 
             print(f"Detected marker IDs: {ids.flatten()}")
             print(f"tvec: {tvec}, angle: {angle:.2f}°, distance: {dist:.2f} m")
 
-            # Turn and move
+            # Turn first
             calArlo.turn_angle(angle)
+
+            # Move in small step toward marker
             if dist > STOP_DISTANCE:
-                calArlo.drive(64, 64, calArlo.FORWARD, calArlo.FORWARD)
+                step = min(dist - STOP_DISTANCE, STEP_DISTANCE)
+                calArlo.drive_distance(step)
             else:
                 print("Reached marker!")
                 break
