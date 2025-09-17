@@ -1,28 +1,30 @@
-# map_landmarks_rotate.py
-# Maps all visible ArUco markers in front of the robot for a few headings.
-# Uses: PiCamera, OpenCV ArUco, your CalibratedRobot methods only.
+# map_landmarks_rotate_cv2.py
+# Maps visible ArUco markers at a few headings using ONLY OpenCV for camera I/O.
 
 import cv2
 import numpy as np
 import time
-from picamera import PiCamera
-from picamera.array import PiRGBArray
 from Exercise1.CalibratedRobot import CalibratedRobot  # adjust path if needed
 
 # --- From your setup / slides ---
 F_PIX = 1275.0          # focal length [pixels]
 MARKER_LEN_M = 0.14     # 140 mm -> meters
 
-# Camera setup
+# -------- Camera setup via OpenCV --------
 RES_W, RES_H = 640, 480
-camera = PiCamera()
-camera.resolution = (RES_W, RES_H)
-camera.framerate = 30
-raw = PiRGBArray(camera, size=(RES_W, RES_H))
-time.sleep(0.2)  # warmup
+# If V4L2 is needed explicitly, use: cv2.VideoCapture(0, cv2.CAP_V4L2)
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH,  RES_W)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, RES_H)
+cap.set(cv2.CAP_PROP_FPS, 30)
+
+# Confirm actual size (some drivers ignore set)
+w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)  or RES_W)
+h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or RES_H)
+RES_W, RES_H = w, h
 
 # Intrinsics: assume principal point at image centre (slides allow this)
-CX, CY = RES_W/2.0, RES_H/2.0  # :contentReference[oaicite:3]{index=3}
+CX, CY = RES_W/2.0, RES_H/2.0
 K = np.array([[F_PIX, 0.0,   CX],
               [0.0,   F_PIX, CY],
               [0.0,   0.0,   1.0]], dtype=np.float64)
@@ -31,19 +33,19 @@ dist = np.zeros((5, 1), dtype=np.float64)
 # ArUco (per slides)
 aruco = cv2.aruco
 DICT = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
-PARAMS = aruco.DetectorParameters_create()  # :contentReference[oaicite:4]{index=4}
+PARAMS = aruco.DetectorParameters_create()
 
 # Robot (we ONLY use existing methods)
 bot = CalibratedRobot()
 
 def scan_landmarks():
     """Capture one frame, detect all markers, return list of (id, x, z, dist)."""
-    camera.capture(raw, format="bgr", use_video_port=True)
-    frame = raw.array
-    raw.truncate(0); raw.seek(0)
+    ok, frame = cap.read()
+    if not ok or frame is None:
+        return []  # no frame -> nothing detected
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    corners, ids, _ = aruco.detectMarkers(gray, DICT, parameters=PARAMS)  # :contentReference[oaicite:5]{index=5}
+    corners, ids, _ = aruco.detectMarkers(gray, DICT, parameters=PARAMS)
 
     results = []
     while True:
@@ -77,4 +79,5 @@ try:
 
 finally:
     bot.stop()
-    camera.close()
+    cap.release()
+    cv2.destroyAllWindows()
