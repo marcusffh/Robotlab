@@ -2,154 +2,110 @@
 """
 find_landmarks.py
 -----------------
-Task 2: Rotate to find an ArUco landmark, align toward it, and drive to it.
-- Uses your CalibratedRobot API (turn_angle, drive_distance, drive, stop).
-- Uses ArucoUtils for camera + detection (+ optional pose).
-
-Simple state machine:
-  SEARCH  -> rotate stepwise until a marker is seen
-  APPROACH-> (pose) yaw-align in small turns, then step forward; repeat
-           (no pose) pixel-align in small turns, then step forward; repeat
-  LOST    -> if detection disappears during approach, go back to SEARCH
-
-Keep it minimal and robust. Tune the constants below on your robot.
+Rotate to find an ArUco marker, align to center (pixel-based), and step toward it.
+Uses your CalibratedRobot (turn_angle, drive_distance, stop) + the detector that
+already works for you (from aruco_utils.detect_one).
 """
 
 import time
 import numpy as np
 import cv2
 
-from Exercise1.CalibratedRobot import CalibratedRobot
-from aruco_utils import ArucoUtils, Intrinsics
+from exercise1.CalibratedRobot import CalibratedRobot  # ensure exercise1/__init__.py exists
+from aruco_utils import ArucoUtils
 
-# ------------- Tuning -------------
-# Search behaviour
-SEARCH_STEP_DEG = 15.0          # rotate this much per search step
-SEARCH_SLEEP_S  = 0.1           # small settle time after each turn
+# ---- Camera / Marker (pixel-only; same idea as your working script) ----
+F_PX      = 1275.0   # if you later want to compute Z_mm = f*X/x
+MARKER_MM = 140.0
+TARGET_ID = None
 
-# Alignment (pose-based)
-YAW_TOL_RAD     = 0.06          # ~3.4 deg tolerance
-YAW_KP_DEG_PER_RAD = 35.0       # map yaw(rad) -> turn step (deg)
-MAX_ALIGN_STEP_DEG = 18.0       # cap per-step rotation
+# ---- Simple tuning (angles & steps; keep it minimal) ----
+SEARCH_STEP_DEG = 15.0     # rotate a bit, stop, check
+SEARCH_SLEEP_S  = 0.10
 
-# Alignment (pixel-based, if no pose)
-PX_TOL          = 12            # deadband in pixels
-PX_KP_DEG_PER_PX = 0.08         # map pixel error -> turn step (deg)
-MAX_ALIGN_STEP_DEG_PX = 18.0
+PX_TOL          = 28       # deadband around image center (pixels)
+PX_KP_DEG_PER_PX = 0.08    # map pixel error -> small turn (deg)
+MAX_ALIGN_STEP_DEG = 18.0
 
-# Forward motion
-STEP_FWD_M      = 0.25          # forward distance per step when still far
-STEP_FWD_MIN_M  = 0.10          # minimum step when very close
-STOP_DIST_M     = 0.22          # stop at this Z (if pose available)
-STOP_SIDE_PX    = 240           # stop when the marker looks this big (no pose)
+STEP_FWD_M      = 0.25     # forward step length
+STEP_FWD_MIN_M  = 0.10
+STOP_SIDE_PX    = 240      # stop when tag looks this big (proxy for distance)
+LOST_LIMIT      = 8
+LOOP_SLEEP_S    = 0.05
 
-# Safety / loop
-LOST_BACK_TO_SEARCH = 6         # frames to tolerate lost detections while approaching
-LOOP_SLEEP_S        = 0.05      # main loop pacing
-RESTRICT_IDS        = None      # e.g. [7] if you only want a specific marker
-# ---------------------------------
-
+def estimate_Z_mm(x_px, f_px=F_PX, X_mm=MARKER_MM):
+    return (f_px * X_mm) / max(x_px, 1e-6)
 
 def main():
-    # If you have calibration, fill these and set marker_size_m (meters).
-    intr = None   # Example: Intrinsics(fx, fy, cx, cy, dist=np.zeros(5))
-    marker_size_m = None  # e.g., 0.14 for 14 cm
-
     bot = CalibratedRobot()
-    aru = ArucoUtils(
-        intrinsics=intr,            # leave None if you’re in pixel mode
-        marker_size_m=marker_size_m,# leave None if you’re in pixel mode
-        res=(1640, 1232),           # pick what you want
-        fps=30
-        )
+    aru = ArucoUtils(res=(960, 720), fps=30)  # matches your working cam settings
     aru.start_camera()
 
     state = "SEARCH"
-    lost_counter = 0
+    lost = 0
 
     try:
         while True:
             ok, frame = aru.read()
             if not ok:
                 bot.stop()
-                print("Camera read failed.")
-                break
+                time.sleep(0.05)
+                continue
 
-            h, w = frame.shape[:2]
-            dets = aru.detect(frame, restrict_ids=RESTRICT_IDS)
-            det = ArucoUtils.choose_largest(dets)
+            det = aru.detect_one(frame, restrict_id=TARGET_ID)
 
             if state == "SEARCH":
                 if det is None:
-                    # rotate a bit and try again
                     ArucoUtils.rotate_step(bot, SEARCH_STEP_DEG)
                     time.sleep(SEARCH_SLEEP_S)
-                else:
+                    continue
+                state = "ALIGN"
+                lost = 0
+                continue
+
+            if det is None:
+                lost += 1
+                if lost >= LOST_LIMIT:
+                    state = "SEARCH"
+                time.sleep(LOOP_SLEEP_S)
+                continue
+
+            # Got a detection — compute pixel error and apparent size
+            cx, w = det["cx"], det["w"]
+            err_px = cx - (w * 0.5)
+            x_px   = det["x_px"]
+
+            if state == "ALIGN":
+                if abs(err_px) <= PX_TOL:
                     state = "APPROACH"
-                    lost_counter = LOST_BACK_TO_SEARCH
-                    continue  # start approach immediately
-
-            elif state == "APPROACH":
-                if det is None:
-                    # temporary loss while moving -> count down, then back to search
-                    if lost_counter > 0:
-                        lost_counter -= 1
-                        time.sleep(LOOP_SLEEP_S)
-                        continue
-                    else:
-                        state = "SEARCH"
-                        continue
-
-                # We have a detection -> align then step forward
-                if det.tvec is not None:
-                    # --- Pose-based path ---
-                    yaw = ArucoUtils.yaw_from_tvec(det.tvec)
-                    z = float(det.tvec[2])
-
-                    if abs(yaw) > YAW_TOL_RAD:
-                        step_deg = float(np.clip(yaw * YAW_KP_DEG_PER_RAD, -MAX_ALIGN_STEP_DEG, MAX_ALIGN_STEP_DEG))
-                        ArucoUtils.rotate_step(bot, step_deg)
-                        time.sleep(SEARCH_SLEEP_S)
-                        continue
-
-                    # facing target; step forward toward stop distance
-                    if z > STOP_DIST_M:
-                        remaining = max(0.0, z - STOP_DIST_M)
-                        step = float(np.clip(remaining, STEP_FWD_MIN_M, STEP_FWD_M))
-                        ArucoUtils.forward_step(bot, step)
-                        time.sleep(SEARCH_SLEEP_S)
-                        continue
-                    else:
-                        bot.stop()
-                        print("Arrived (pose).")
-                        break
-
                 else:
-                    # --- Pixel-based path (no intrinsics) ---
-                    err_px = det.center_xy[0] - (w * 0.5)
-                    if abs(err_px) > PX_TOL:
-                        step_deg = float(np.clip(err_px * PX_KP_DEG_PER_PX, -MAX_ALIGN_STEP_DEG_PX, MAX_ALIGN_STEP_DEG_PX))
-                        ArucoUtils.rotate_step(bot, step_deg)
-                        time.sleep(SEARCH_SLEEP_S)
-                        continue
+                    step_deg = float(np.clip(err_px * PX_KP_DEG_PER_PX, -MAX_ALIGN_STEP_DEG, MAX_ALIGN_STEP_DEG))
+                    ArucoUtils.rotate_step(bot, step_deg)
+                    time.sleep(SEARCH_SLEEP_S)
+                continue
 
-                    # centered; step forward until the marker fills enough pixels
-                    if det.side_px < STOP_SIDE_PX:
-                        ArucoUtils.forward_step(bot, STEP_FWD_M)
-                        time.sleep(SEARCH_SLEEP_S)
-                        continue
-                    else:
-                        bot.stop()
-                        print("Arrived (pixel size).")
-                        break
+            if state == "APPROACH":
+                # Stop condition in pixel-mode: when the tag looks big enough
+                if x_px >= STOP_SIDE_PX:
+                    bot.stop()
+                    print("Arrived (pixel size).")
+                    break
 
-            # tiny pace to avoid busy-waiting
+                # Still far: take a short forward step
+                ArucoUtils.forward_step(bot, STEP_FWD_M)
+                time.sleep(SEARCH_SLEEP_S)
+                continue
+
             time.sleep(LOOP_SLEEP_S)
 
+    except KeyboardInterrupt:
+        print("\n[ABORT] Ctrl-C")
     finally:
-        bot.stop()
+        try:
+            bot.stop()
+        except:
+            pass
         aru.stop_camera()
-
 
 if __name__ == "__main__":
     main()
