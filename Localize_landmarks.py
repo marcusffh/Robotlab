@@ -57,6 +57,7 @@ parameters = aruco.DetectorParameters_create()
 def search_and_drive():
     marker_size = 140   # mm
     driving = False
+    STOP_BUFFER = 0.1
 
     while True:
         ret, frame = read_fn()
@@ -75,7 +76,7 @@ def search_and_drive():
 
             # Compute angle and distance
             angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))  # flip sign if needed
-            dist = tvec[2]/1000 
+            dist = (tvec[2]/1000) -STOP_BUFFER
             dist = max(dist, 0)  # avoid negative distance
 
             print(f"Detected marker IDs: {ids.flatten()}")
