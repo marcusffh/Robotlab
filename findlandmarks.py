@@ -1,41 +1,43 @@
 #!/usr/bin/env python3
 """
-find_landmark_steps.py
-Stepwise approach using CalibratedRobot only:
-SEARCH → ALIGN (micro turns) → APPROACH (alternate tiny correction & straight step) → DONE.
+find_landmark_halfsteps.py
+SEARCH → ALIGN → HALF_STEP → REALIGN → (repeat) → DONE
 
-Vision: our existing ArUco detection + Z-from-pixels (no ArucoUtils).
-Motion: ONLY CalibratedRobot.turn_angle / drive_distance / stop (no raw wheel power).
+- Vision: our ArUco detector + Z from pixel height (no ArucoUtils).
+- Motion: ONLY CalibratedRobot.turn_angle / drive_distance / stop.
+- Strategy: From each alignment, drive HALF of the remaining distance to STOP,
+            then re-align, and repeat until Z ≤ STOP_AT_MM.
 """
 
 import time, sys, os, select, signal
 import numpy as np
 
 # ========= Camera / marker =========
-F_PX        = 1275.0     # focal length in px (your calibration)
-MARKER_MM   = 140.0      # 14 cm tag
-TARGET_ID   = None       # lock to a specific id or leave None
+F_PX        = 1275.0      # focal length (px)
+MARKER_MM   = 140.0       # marker size (mm)
+TARGET_ID   = None        # or set an int to track a specific id
 
-# ========= Search / align tuning =========
-SEARCH_STEP_DEG        = 8.0      # small rotate pulse per search step
-SEARCH_SLEEP_S         = 0.06
-PX_TOL                 = 30       # center deadband in pixels
-PX_KP_DEG_PER_PX       = 0.05     # +err (marker right) -> NEG turn (right)
+# ========= Align tuning =========
+PX_TOL                 = 30          # deadband around center (px)
+PX_KP_DEG_PER_PX       = 0.05        # +err (marker right) -> NEG turn (right)
 MAX_ALIGN_STEP_DEG     = 10.0
+ALIGN_SLEEP_S          = 0.06
 
-# ========= Forward step policy =========
-STOP_AT_MM             = 50.0     # 5 cm stand-off
-STEP_MIN_M             = 0.08
-STEP_MAX_M             = 0.35
-STEP_SCALE             = 0.60     # step ≈ remaining(m) * SCALE, clamped to [MIN, MAX]
+# ========= Step policy =========
+STOP_AT_MM             = 50.0        # 5 cm stand-off
+HALFSTEP_MIN_M         = 0.08
+HALFSTEP_MAX_M         = 0.40        # cap a single half step
+FINAL_MIN_M            = 0.05        # tiny last nudge if needed
 
-# ========= Robustness =========
+# ========= Search / robustness =========
+SEARCH_STEP_DEG        = 8.0         # small rotate pulse during SEARCH
+SEARCH_SLEEP_S         = 0.06
 LOST_LIMIT             = 12
 LOOP_SLEEP_S           = 0.04
 
 # ========= Safe abort =========
 ABORT = False
-def _sig(*_):  # SIGINT/SIGTERM
+def _sig(*_):
     global ABORT; ABORT = True
 signal.signal(signal.SIGINT, _sig)
 signal.signal(signal.SIGTERM, _sig)
@@ -120,46 +122,45 @@ def detect_marker(frame_bgr, restrict_id=None):
     return {"id": mid, "x_px": float(x_px), "cx": cx, "w": w}
 
 def estimate_Z_mm(x_px, f_px=F_PX, X_mm=MARKER_MM):
-    # pinhole: Z = f*X/x
     return (f_px * X_mm) / max(x_px, 1e-6)
 
-# ========= Motion helpers (CalibratedRobot) =========
+# ========= Motion helpers =========
 def rotate_step(bot: CalibratedRobot, deg: float, speed=None):
-    """Turn a small angle. Positive deg = left, negative = right (CalibratedRobot convention)."""
+    """Positive deg = left, negative = right (CalibratedRobot)."""
     if abs(deg) < 0.1:
         return
     bot.turn_angle(deg, speed=speed)
 
 def forward_step(bot: CalibratedRobot, meters: float, speed=None):
-    """Drive straight forward for 'meters'."""
     if meters <= 0.0:
         return
     bot.drive_distance(meters, direction=bot.FORWARD, speed=speed)
 
-# ========= Control logic =========
 def choose_turn_deg(err_px: float) -> float:
     """
-    err_px = cx - w/2 ; positive => marker appears to the RIGHT.
-    To center, we must turn RIGHT ⇒ NEGATIVE degrees for CalibratedRobot.turn_angle.
+    err_px = cx - w/2 ; positive => marker visually RIGHT of center.
+    To center: turn RIGHT ⇒ NEGATIVE degrees for CalibratedRobot.
     """
     step = -(err_px * PX_KP_DEG_PER_PX)
     return float(np.clip(step, -MAX_ALIGN_STEP_DEG, MAX_ALIGN_STEP_DEG))
 
-def choose_step_m(Z_mm: float) -> float:
-    remaining_m = max(0.0, Z_mm - STOP_AT_MM) / 1000.0
-    step = remaining_m * STEP_SCALE
-    return float(np.clip(step, STEP_MIN_M, STEP_MAX_M))
+def choose_halfstep_m(Z_mm: float) -> float:
+    """Half of remaining distance to STOP, in meters, clamped."""
+    remaining_mm = max(0.0, Z_mm - STOP_AT_MM)
+    half_m = 0.5 * (remaining_mm / 1000.0)
+    if remaining_mm <= 120.0:  # if we're very close, allow a tiny nudge
+        half_m = max(half_m, FINAL_MIN_M)
+    return float(np.clip(half_m, HALFSTEP_MIN_M, HALFSTEP_MAX_M))
 
+# ========= Main control =========
 def main():
-    # Robot + Camera
     bot = CalibratedRobot()
     read_fn, release_fn = make_camera()
 
-    state     = "SEARCH"
-    lost      = 0
-    need_turn = True  # APPROACH alternates: small correction -> straight forward step
+    state = "SEARCH"
+    lost  = 0
 
-    print("find_landmark_steps: SEARCH → ALIGN → APPROACH → DONE (CalibratedRobot only)")
+    print("Half-steps: SEARCH → ALIGN → HALF_STEP → REALIGN → (repeat) → DONE")
     try:
         while True:
             if ABORT or user_requested_quit():
@@ -185,11 +186,11 @@ def main():
                 x_px, cx, w = det["x_px"], det["cx"], det["w"]
                 err_px = cx - (w * 0.5)
                 Z_mm   = estimate_Z_mm(x_px)
-                print(f"[FOUND] id={det['id']}  Z≈{Z_mm:.0f} mm  size={x_px:.1f}px  err={err_px:.1f}px")
+                print(f"[FOUND] id={det['id']}  Z≈{Z_mm:.0f} mm  err={err_px:.1f}px")
                 state = "ALIGN"; lost = 0
                 continue
 
-            # ===== LOSS HANDLING (other states) =====
+            # ===== LOSS handling (other states) =====
             if det is None:
                 lost += 1
                 print(f"[LOST] no detection ({lost}/{LOST_LIMIT})")
@@ -203,42 +204,60 @@ def main():
 
             # Parse detection
             cx, w = det["cx"], det["w"]
-            err_px = cx - (w * 0.5)  # +: marker right of center
-            x_px   = det["x_px"]
+            x_px  = det["x_px"]
+            err_px = cx - (w * 0.5)
             Z_mm   = estimate_Z_mm(x_px)
 
             # ===== ALIGN =====
             if state == "ALIGN":
                 if abs(err_px) <= PX_TOL:
-                    print(f"[ALIGN→APPROACH] centered; Z≈{Z_mm:.0f} mm")
-                    state = "APPROACH"; need_turn = True
+                    # aligned -> compute half step length
+                    step_m = choose_halfstep_m(Z_mm)
+                    print(f"[ALIGN→HALF] centered (err={err_px:.1f}px). Z≈{Z_mm:.0f} mm → half-step {step_m:.2f} m")
+                    state = "HALF_STEP"
+                    # execute immediately
+                    forward_step(bot, step_m)
+                    time.sleep(ALIGN_SLEEP_S)
                 else:
-                    turn_deg = choose_turn_deg(err_px)  # NEG when marker is right -> turn right
+                    turn_deg = choose_turn_deg(err_px)
                     print(f"[ALIGN] err={err_px:.1f}px → turn {turn_deg:.1f}°")
                     rotate_step(bot, turn_deg)
-                    time.sleep(SEARCH_SLEEP_S)
+                    time.sleep(ALIGN_SLEEP_S)
                 continue
 
-            # ===== APPROACH (alternate tiny correction & straight step) =====
-            if state == "APPROACH":
+            # ===== HALF_STEP executed above; after motion, we re-read next loop =====
+            if state == "HALF_STEP":
+                # After the move, take a fresh measurement
+                # (det is from the current frame; we want a post-move measurement,
+                # so just re-evaluate using the same branch on the next iteration.)
+                # Check if we are close enough already:
                 if Z_mm <= STOP_AT_MM:
                     bot.stop()
-                    print(f"[DONE] close enough: Z≈{Z_mm:.0f} mm (≤ {STOP_AT_MM:.0f} mm)")
+                    print(f"[DONE] close enough after half-step: Z≈{Z_mm:.0f} mm (≤ {STOP_AT_MM:.0f} mm)")
                     break
+                # Otherwise, go realign:
+                print(f"[HALF→REALIGN] Z≈{Z_mm:.0f} mm; re-aligning…")
+                state = "REALIGN"
+                continue
 
-                if need_turn and abs(err_px) > PX_TOL:
+            # ===== REALIGN =====
+            if state == "REALIGN":
+                if abs(err_px) <= PX_TOL:
+                    # Recentered; either done or take another half step
+                    if Z_mm <= STOP_AT_MM:
+                        bot.stop()
+                        print(f"[DONE] centered at Z≈{Z_mm:.0f} mm (≤ {STOP_AT_MM:.0f} mm)")
+                        break
+                    step_m = choose_halfstep_m(Z_mm)
+                    print(f"[REALIGN→HALF] err={err_px:.1f}px; Z≈{Z_mm:.0f} mm → half-step {step_m:.2f} m")
+                    state = "HALF_STEP"
+                    forward_step(bot, step_m)
+                    time.sleep(ALIGN_SLEEP_S)
+                else:
                     turn_deg = choose_turn_deg(err_px)
-                    print(f"[MOVE] correcting: turn {turn_deg:.1f}°  (err={err_px:.1f}px, Z≈{Z_mm:.0f} mm)")
+                    print(f"[REALIGN] err={err_px:.1f}px → turn {turn_deg:.1f}°")
                     rotate_step(bot, turn_deg)
-                    need_turn = False
-                    time.sleep(SEARCH_SLEEP_S)
-                    continue
-
-                step_m = choose_step_m(Z_mm)
-                print(f"[MOVE] forward {step_m:.2f} m  (Z≈{Z_mm:.0f} mm)")
-                forward_step(bot, step_m)
-                need_turn = True
-                time.sleep(SEARCH_SLEEP_S)
+                    time.sleep(ALIGN_SLEEP_S)
                 continue
 
             time.sleep(LOOP_SLEEP_S)
