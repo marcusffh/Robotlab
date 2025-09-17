@@ -56,7 +56,12 @@ def main():
     marker_size_m = None  # e.g., 0.14 for 14 cm
 
     bot = CalibratedRobot()
-    aru = ArucoUtils(cam_cfg=CameraConfig(), intrinsics=intr, marker_size_m=marker_size_m)
+    aru = ArucoUtils(
+        intrinsics=intr,            # leave None if you’re in pixel mode
+        marker_size_m=marker_size_m,# leave None if you’re in pixel mode
+        res=(1640, 1232),           # pick what you want
+        fps=30
+        )
     aru.start_camera()
 
     state = "SEARCH"
