@@ -7,16 +7,8 @@ from Exercise1.CalibratedRobot import CalibratedRobot
 # Initialize robot
 calArlo = CalibratedRobot()
 
-# Camera parameters (replace fx, fy with calibration)
-focal_length = 1275  # pixels
-
-# ArUco dictionary
-aruco_dict = aruco.Dictionary_get(aruco.DICT_6X6_250)
-parameters = aruco.DetectorParameters_create()
-
 # ================= CAMERA HELPERS =================
 def make_camera(width=960, height=720, fps=30):
-    """Return (read_fn, release_fn) that yields BGR frames."""
     try:
         from picamera2 import Picamera2
         cam = Picamera2()
@@ -50,15 +42,22 @@ def make_camera(width=960, height=720, fps=30):
 
 read_fn, release_fn, width, height = make_camera()
 
-# Set camera matrix after knowing width/height
-camera_matrix = np.array([[focal_length, 0, 0],
-                          [0, focal_length, 0],
+# Camera parameters
+focal_length = 1275  # pixels
+camera_matrix = np.array([[focal_length, 0, width/2],
+                          [0, focal_length, height/2],
                           [0, 0, 1]], dtype=np.float32)
 dist_coeffs = np.zeros((5, 1))
 
-# ================== SEARCH + DRIVE =================
+# ArUco dictionary
+aruco_dict = aruco.Dictionary_get(aruco.DICT_6X6_250)
+parameters = aruco.DetectorParameters_create()
+
+# ================= SEARCH + DRIVE =================
 def search_and_drive():
-    marker_size = 140  # mm
+    marker_size = 140   # mm
+    driving = False
+    STOP_BUFFER = 0.1
 
     while True:
         ret, frame = read_fn()
@@ -75,18 +74,24 @@ def search_and_drive():
             )
             tvec = tvecs[0][0]
 
-            # Angle and distance
-            angle = np.degrees(np.arctan2(tvec[0], tvec[2]))
-            dist = tvec[2] / 1000.0  # meters
+            # Compute angle and distance
+            angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))  # flip sign if needed
+            dist = (tvec[2]/1000) -STOP_BUFFER
+            dist = max(dist, 0)  # avoid negative distance
 
             print(f"Detected marker IDs: {ids.flatten()}")
             print(f"tvec: {tvec}, angle: {angle:.2f}°, distance: {dist:.2f} m")
 
+            # Turn and move
             calArlo.turn_angle(angle)
-            calArlo.drive_distance(min(dist, 0.3))
+            if dist > 0 and not driving:
+                driving = True
+                calArlo.drive_distance(dist)
 
-            if dist < 0.2:
+            if dist <= 0:
                 print("Reached landmark!")
+                calArlo.stop()
+                driving = False
                 break
         else:
             print("Searching for marker...")

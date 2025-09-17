@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Picamera2-only ArUco utilities using your working detector.
+# Picamera2-only ArUco utilities (BGR, DICT_6X6_250; no grayscale, no fallbacks).
+# Mirrors your working detector and exposes simple helpers.
 
 from __future__ import annotations
 from dataclasses import dataclass
@@ -16,17 +17,18 @@ class Intrinsics:
     fy: float
     cx: float
     cy: float
-    dist: np.ndarray  # not used in pixel-only mode; kept for future pose mode
+    dist: np.ndarray  # kept for future pose mode (not used here)
 
 
 class ArucoUtils:
     def __init__(self, res: Tuple[int, int] = (960, 720), fps: int = 30):
+        # 960x720 main stream => sensor still runs 1640x1232 internally; ISP downsamples nicely.
         self.res = res
         self.fps = fps
         self._picam2: Optional[Picamera2] = None
         self._started = False
 
-        # EXACTLY as in your working script:
+        # Exact dictionary + default params (as in your working code)
         self._dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
         self._params = cv2.aruco.DetectorParameters_create()
 
@@ -44,7 +46,7 @@ class ArucoUtils:
         )
         cam.configure(cfg)
         cam.start()
-        time.sleep(0.8)  # same warm-up as your script
+        time.sleep(0.8)  # same warm-up that worked for you
         self._picam2 = cam
         self._started = True
 
@@ -67,7 +69,7 @@ class ArucoUtils:
         """
         Detect DICT_6X6_250 on BGR and return:
             { 'id': int, 'x_px': float, 'cx': float, 'w': int }
-        or None if not found. Chooses the largest by perimeter.
+        or None if not found. Chooses the largest by perimeter (stable).
         """
         aruco = cv2.aruco
         corners_list, ids, _ = aruco.detectMarkers(frame_bgr, self._dict, parameters=self._params)
@@ -80,8 +82,12 @@ class ArucoUtils:
             if restrict_id is not None and mid != restrict_id:
                 continue
             pts = c.reshape(-1, 2)  # TL, TR, BR, BL
-            per = (np.linalg.norm(pts[0]-pts[1]) + np.linalg.norm(pts[1]-pts[2]) +
-                   np.linalg.norm(pts[2]-pts[3]) + np.linalg.norm(pts[3]-pts[0]))
+            per = (
+                np.linalg.norm(pts[0] - pts[1]) +
+                np.linalg.norm(pts[1] - pts[2]) +
+                np.linalg.norm(pts[2] - pts[3]) +
+                np.linalg.norm(pts[3] - pts[0])
+            )
             if best is None or per > best[0]:
                 best = (per, mid, pts)
 
@@ -92,21 +98,24 @@ class ArucoUtils:
         TL, TR, BR, BL = pts
         v1 = np.linalg.norm(TL - BL)
         v2 = np.linalg.norm(TR - BR)
-        x_px = 0.5 * (v1 + v2)  # vertical pixel height (mean of both sides)
-        cx = float((TL[0] + TR[0] + BR[0] + BL[0]) / 4.0)
+        x_px = 0.5 * (v1 + v2)               # vertical pixel height (mean of both sides)
+        cx   = float((TL[0]+TR[0]+BR[0]+BL[0]) / 4.0)
         h, w = frame_bgr.shape[:2]
         return {"id": mid, "x_px": float(x_px), "cx": cx, "w": w}
 
-    # ---------- Robot call-through helpers ----------
+    # ---------- Tiny helpers (call your CalibratedRobot API) ----------
     @staticmethod
     def rotate_step(bot, angle_deg: float, speed: Optional[int] = None) -> None:
+        """
+        Positive angle = left, negative = right (matches your CalibratedRobot.turn_angle).
+        """
         bot.turn_angle(angle_deg, speed=speed)
 
     @staticmethod
     def forward_step(bot, meters: float, speed: Optional[int] = None) -> None:
         bot.drive_distance(meters, direction=bot.FORWARD, speed=speed)
 
-    # Back-compat alias if some scripts still call go_forward_step(...)
+    # Back-compat alias if another script used this name
     @staticmethod
     def go_forward_step(bot, meters: float, speed: Optional[int] = None) -> None:
         ArucoUtils.forward_step(bot, meters, speed)
