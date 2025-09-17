@@ -50,7 +50,7 @@ camera_matrix = np.array([[focal_length, 0, width/2],
 dist_coeffs = np.zeros((5, 1))
 
 # ArUco dictionary
-aruco_dict = aruco.Dictionary_get(aruco.DICT_6X6_250)
+aruco_dict = aruco.Dictionary_get(aruco.DICT_8X8_250)
 parameters = aruco.DetectorParameters_create()
 
 # ================= SEARCH + DRIVE =================
