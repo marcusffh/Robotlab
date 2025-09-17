@@ -64,7 +64,7 @@ parameters.cornerRefinementMaxIterations = 30
 def search_and_drive():
     marker_size = 140   # mm
     STOP_BUFFER = 0.3
-    STOP_DISTANCE = 0.2
+    STOP_DISTANCE = 0.1
 
     while True:
         ret, frame = read_fn()
@@ -91,11 +91,8 @@ def search_and_drive():
 
             # Turn and move
             calArlo.turn_angle(angle)
-            if dist > STOP_DISTANCE:
+            while dist > STOP_DISTANCE:
                 calArlo.drive(64, 64, calArlo.FORWARD, calArlo.FORWARD)
-            else:
-                print("Reached marker!")
-                break
         else:
             print("Searching for marker...")
             calArlo.drive(25, 25, calArlo.BACKWARD, calArlo.FORWARD)
