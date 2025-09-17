@@ -2,7 +2,7 @@ import cv2
 import cv2.aruco as aruco
 import numpy as np
 import time
-from Exercise1.CalibratedRobot import CalibratedRobot
+from Robotutils.CalibratedRobot import CalibratedRobot
 
 # Initialize robot
 calArlo = CalibratedRobot()
