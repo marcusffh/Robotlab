@@ -62,7 +62,7 @@ def make_camera(width=960, height=720, fps=30):
     
 read_fn, release_fn = make_camera()
 def search_and_drive():
-    marker_size = 105   
+    marker_size = 140   
 
     while True:
         ret, frame = read_fn()
