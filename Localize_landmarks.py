@@ -74,6 +74,7 @@ def search_and_drive():
 
             # Compute angle and distance
             angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))  # flip sign if needed
+            dist = tvec[2]/1000 
             dist = max(dist, 0)  # avoid negative distance
 
             print(f"Detected marker IDs: {ids.flatten()}")
