@@ -56,6 +56,8 @@ parameters = aruco.DetectorParameters_create()
 # ================= SEARCH + DRIVE =================
 def search_and_drive():
     marker_size = 140   # mm
+    STOP_BUFFER = 0.3
+    STOP_DISTANCE = 200
 
     while True:
         ret, frame = read_fn()
@@ -74,7 +76,7 @@ def search_and_drive():
 
             # Compute angle and distance
             angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))  # flip sign if needed
-            dist = tvec[2]/1000 
+            dist = tvec[2]/1000 - STOP_BUFFER
             dist = max(dist, 0)  # avoid negative distance
 
             print(f"Detected marker IDs: {ids.flatten()}")
@@ -82,14 +84,14 @@ def search_and_drive():
 
             # Turn and move
             calArlo.turn_angle(angle)
-            calArlo.drive_distance(dist)
-
-            if dist <= 0:
-                print("Reached landmark!")
+            if dist > STOP_DISTANCE:
+                calArlo.drive(64, 64, calArlo.FORWARD, calArlo.FORWARD)
+            else:
+                print("Reached marker!")
                 break
         else:
             print("Searching for marker...")
-            calArlo.drive(50, 50, calArlo.BACKWARD, calArlo.FORWARD)
+            calArlo.drive(25, 25, calArlo.BACKWARD, calArlo.FORWARD)
             time.sleep(0.2)
             calArlo.stop()
 
