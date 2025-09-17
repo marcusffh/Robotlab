@@ -1,63 +1,20 @@
 # find_landmark_search_then_drive_updated.py
 import time
 import numpy as np
-from CameraDetection_util import CameraUtils, ArucoUtils
-import robot
+from Robotutils.CameraDetection_util import CameraUtils, ArucoUtils
+import Robotutils.robot as robot
 import cv2
+from Robotutils.CalibratedRobot import CalibratedRobot
 
-# ==== Config ====
-F_PX      = 1275.0
-MARKER_MM = 140.0
-TARGET_ID = None
 
 IMG_W, IMG_H, FPS  = 960, 720, 30
 
-STOP_AT_MM           = 420.0
-CENTER_DEADBAND_PX   = 28
-REQUIRED_HITS        = 2
-LOST_GRACE_FRAMES    = 10
-LOST_TO_SEARCH       = 25
-
-TURN_PWR   = 50
-BASE_PWR   = 60
-MAX_PWR, MIN_PWR = 100, 40
-Kp_far, Kp_near = 0.10, 0.06
-MAX_STEER  = 24
-EMA_ALPHA  = 0.35
-
-# ==== Helper functions ====
-def clamp_power(p):
-    if p <= 0: return 0
-    return max(MIN_PWR, min(MAX_PWR, int(round(p))))
-
-_spin = {"on": False, "t0": 0.0}
-def spin_pwm_step(arlo, power, period_ms=350, duty=0.22):
-    now = time.time()
-    if _spin["t0"] == 0.0:
-        _spin["t0"] = now; _spin["on"] = False
-    elapsed = (now - _spin["t0"]) * 1000.0
-    on_ms   = duty * period_ms
-    off_ms  = (1.0 - duty) * period_ms
-    if _spin["on"]:
-        if elapsed >= on_ms:
-            arlo.stop()
-            _spin["on"] = False
-            _spin["t0"] = now
-    else:
-        if elapsed >= off_ms:
-            L = clamp_power(power); R = clamp_power(power)
-            arlo.go_diff(L, R, 0, 1)  # spin left
-            _spin["on"] = True
-            _spin["t0"] = now
-
-def estimate_Z_mm(x_px, f_px=F_PX, X_mm=MARKER_MM):
-    return (f_px * X_mm) / max(x_px, 1e-6)
 
 # ==== Init Robot + Camera + Aruco ====
-arlo = robot.Robot()
+arlo = CalibratedRobot
 cam = CameraUtils(width=IMG_W, height=IMG_H, fx=F_PX, fy=F_PX)
 cam.start_camera(width=IMG_W, height=IMG_H, fps=FPS)
-aruco = ArucoUtils(marker_length=MARKER_MM/1000.0)  # convert mm → m
+aruco = ArucoUtils()  # convert mm → m
 
 SEARCH, DRIVE = 0, 1
 state = SEARCH

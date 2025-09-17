@@ -1,5 +1,5 @@
 import time
-import robot
+import Robotutils.robot as robot
 
 class CalibratedRobot:
     def __init__(self):
@@ -18,6 +18,8 @@ class CalibratedRobot:
         self.default_speed = 64  
         self.FORWARD = 1
         self.BACKWARD = 0
+        
+        self.stop_distance = 200
 
     def clamp_power(self, p):
         return max(self.MIN_PWR, min(self.MAX_PWR, int(round(p))))
@@ -54,5 +56,12 @@ class CalibratedRobot:
             time.sleep(duration)
             self.arlo.stop()
             
+    def forward_proximity_check(self, center_dist = 0, left_dist = 0, right_dist = 0):
+        left = self.arlo.read_left_ping_sensor()
+        center = self.arlo.read_front_ping_sensor()
+        right = self.arlo.read_right_ping_sensor()
+        if center < center_dist or left < left_dist or right < right_dist:
+            self.arlo.stop()
+               
     def stop(self):
         self.arlo.stop()
