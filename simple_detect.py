@@ -29,14 +29,7 @@ def make_camera(w=IMG_W, h=IMG_H, fps=FPS):
             try: cam.stop()
             except: pass
         return read, release
-    except Exception as e:
-        cap = cv2.VideoCapture(
-            ("libcamerasrc ! videobox autocrop=true ! "
-             f"video/x-raw, width=(int){w}, height=(int){h}, framerate=(fraction){fps}/1 ! "
-             "videoconvert ! appsink"),
-            cv2.CAP_GSTREAMER)
-        if not cap.isOpened(): raise RuntimeError(f"Camera init failed: {e}")
-        return cap.read, cap.release
+    
 
 def map_landmarks_once():
     read, release = make_camera()
