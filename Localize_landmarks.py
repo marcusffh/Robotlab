@@ -52,8 +52,15 @@ dist_coeffs = np.zeros((5, 1))
 # ArUco dictionary
 aruco_dict = aruco.Dictionary_get(aruco.DICT_6X6_250)
 parameters = aruco.DetectorParameters_create()
+parameters.adaptiveThreshWinSizeMin = 3
+parameters.adaptiveThreshWinSizeMax = 23
+parameters.adaptiveThreshWinSizeStep = 5
+parameters.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+parameters.cornerRefinementWinSize = 5
+parameters.cornerRefinementMaxIterations = 30
 
 # ================= SEARCH + DRIVE =================
+
 def search_and_drive():
     marker_size = 140   # mm
     STOP_BUFFER = 0.3
