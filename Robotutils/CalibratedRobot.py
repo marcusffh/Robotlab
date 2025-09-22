@@ -9,7 +9,7 @@ class CalibratedRobot:
         self.TURN_TIME = 0.89 # time to turn 90 degrees at default speed (64)
         
         #ratio for adjusting the wheels to have the same power
-        self.CAL_KL = 0.96
+        self.CAL_KL = 0.97
         self.CAL_KR = 1.0
         
         self.MIN_PWR = 40
