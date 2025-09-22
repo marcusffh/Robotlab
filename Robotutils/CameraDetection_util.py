@@ -11,14 +11,15 @@ class CameraUtils:
     OpenCV.
     """
     ## Camera calibration
-    def __init__(self, width=3280, height=2462, fx=1360, fy=1360, cx=None, cy=None):
+    def __init__(self, width=1920, height=1080, fx=1360, fy=1360, cx=None, cy=None, fps = 30):
         self.picam2 = None
-        self.width = width
-        self.height = height
-        self.fx = fx
-        self.fy = fy
-        self.cx = cx if cx is not None else width / 2 ## 
-        self.cy = cy if cy is not None else height / 2 ##
+        self.width = width #resultion
+        self.height = height #resulution
+        self.fps = fps 
+        self.fx = fx #focal length
+        self.fy = fy # --||--
+        self.cx = cx if cx is not None else width / 2 ## image sensor
+        self.cy = cy if cy is not None else height / 2 ## --||--
         self.dist = np.zeros((5, 1))  # assume no distortion
         self.camera_matrix = np.array([
             [self.fx, 0, self.cx],
@@ -26,13 +27,15 @@ class CameraUtils:
             [0,     0,     1]
             ], dtype=np.float32)
 
-    def start_camera(self, width: int = 640, height: int = 480, fps: int = 30):
+    def start_camera(self):
         """Start the PiCamera2."""
-
         self.picam2 = Picamera2()
         config = self.picam2.create_video_configuration(
-            main={"size": (width, height), "format": "RGB888"}
+            main={"size": (self.width, self.height), "format": "RGB888"}
         )
+          # Apply fixed fps
+        frame_time = int(1e6 / self.fps)
+        config["controls"]["FrameDurationLimits"] = (frame_time, frame_time)
         self.picam2.configure(config)
         self.picam2.start()
 
