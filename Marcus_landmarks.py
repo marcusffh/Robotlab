@@ -22,13 +22,10 @@ def drive_to_landmark():
         frame = cam.get_frame()
         corners, ids = aruco.detect_markers(frame)
         if ids is not None:
-            ids = ids.flatten()
-            for i, marker_id in enumerate(ids):
-                if marker_id == last_id:
-                    continue 
+                marker_id = ids[0]
                 print(f"id found: {marker_id}")
                 rvecs, tvecs = aruco.estimate_pose(corners, cam.camera_matrix)
-                tvec = tvecs[i][0]
+                tvec = tvecs[0][0]
 
                 dist = (aruco.compute_distance_to_marker(tvec)) - STOP_BUFFER
                 dist = max(0, dist)
@@ -45,9 +42,9 @@ def drive_to_landmark():
                     isDriving = False
                     break
         else:
-            calArlo.drive(10, 10, calArlo.BACKWARD, calArlo.FORWARD)
-            time.sleep(0.2)
-            calArlo.stop()
+            calArlo.turn_angle(5)
+
+    calArlo.stop()
 
 try:
     drive_to_landmark()
