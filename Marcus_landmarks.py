@@ -28,7 +28,6 @@ def drive_to_landmark():
                 tvec = tvecs[0][0]
 
                 dist = (aruco.compute_distance_to_marker(tvec)) - STOP_BUFFER
-                dist = max(0, dist)
                 angle = aruco.compute_rotation_to_marker(tvec)
             
                 calArlo.turn_angle(angle)
