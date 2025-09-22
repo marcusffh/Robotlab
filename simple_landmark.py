@@ -1,6 +1,6 @@
 # find_landmark_search_then_drive.py
 import time, cv2, numpy as np
-import robot
+import Robotutils.robot
 
 # ==== Camera / marker ====
 F_PX      = 1275.0
