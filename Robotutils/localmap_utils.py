@@ -49,3 +49,58 @@ def segment_in_collision(p, q, circles, step=0.02):
         if point_in_collision(x0 + t*dx, y0 + t*dy, circles):
             return True
     return False
+# --- Minimal occupancy grid utils (Part 1 option A) --------------------------
+class Grid:
+    """Boolean occupancy grid in a local window around the robot."""
+    def __init__(self, width_m=6.0, height_m=6.0, resolution_m=0.05, origin_xy_m=(-3.0, -3.0)):
+        self.res = float(resolution_m)
+        self.w = int(round(width_m / self.res))
+        self.h = int(round(height_m / self.res))
+        self.ox, self.oy = origin_xy_m
+        self._g = [[False for _ in range(self.w)] for _ in range(self.h)]
+
+    def world_to_grid(self, x, y):
+        gx = int((x - self.ox) // self.res)
+        gy = int((y - self.oy) // self.res)
+        if 0 <= gx < self.w and 0 <= gy < self.h:
+            return gx, gy
+        return None
+
+    def _stamp_disc(self, cx, cy, R):
+        if R <= 0: return
+        r2 = R * R
+        # Bound box (clamped to grid)
+        gmin = self.world_to_grid(cx - R, cy - R) or (0, 0)
+        gmax = self.world_to_grid(cx + R, cy + R) or (self.w - 1, self.h - 1)
+        gx0, gy0 = max(0, gmin[0]), max(0, gmin[1])
+        gx1, gy1 = min(self.w - 1, gmax[0]), min(self.h - 1, gmax[1])
+        for gy in range(gy0, gy1 + 1):
+            yc = self.oy + (gy + 0.5) * self.res
+            for gx in range(gx0, gx1 + 1):
+                xc = self.ox + (gx + 0.5) * self.res
+                if (xc - cx) ** 2 + (yc - cy) ** 2 <= r2:
+                    self._g[gy][gx] = True
+
+    def occupied(self, x, y):
+        g = self.world_to_grid(x, y)
+        if g is None:
+            return True  # out of map = blocked
+        gx, gy = g
+        return self._g[gy][gx]
+
+    def to_numpy(self):
+        try:
+            import numpy as np
+            return np.array(self._g, dtype=bool)
+        except Exception:
+            return None
+
+def build_grid(circles, width_m=6.0, height_m=6.0, resolution_m=0.05, origin_xy_m=(-3.0, -3.0)):
+    """
+    circles: [(cx, cy, R)] in meters (already inflated).
+    Returns: Grid() with discs stamped in.
+    """
+    g = Grid(width_m, height_m, resolution_m, origin_xy_m)
+    for (cx, cy, R) in circles:
+        g._stamp_disc(cx, cy, R)
+    return g
