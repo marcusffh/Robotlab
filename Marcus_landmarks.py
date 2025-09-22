@@ -42,7 +42,7 @@ def drive_to_landmark():
         else:
             calArlo.turn_angle(15)
             calArlo.stop()
-            time.sleep(1)
+           # time.sleep(1)
 
 try:
     drive_to_landmark()
