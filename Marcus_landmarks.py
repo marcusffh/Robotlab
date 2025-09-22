@@ -26,8 +26,9 @@ def drive_to_landmark():
             rvecs, tvecs = aruco.estimate_pose(corners, cam.camera_matrix)
             tvec = tvecs[0][0]
 
-            dist = aruco.compute_distance_to_marker(tvec, STOP_BUFFER )
+            dist = aruco.compute_distance_to_marker(tvec)
             angle = aruco.compute_rotation_to_marker(tvec)
+            print(f"distance: {dist}")
         
             calArlo.turn_angle(angle)
         
@@ -39,8 +40,9 @@ def drive_to_landmark():
                 last_id = marker_id
                 isDriving = False
         else:
-            calArlo.turn_angle(20)
-    calArlo.stop()
+            calArlo.turn_angle(15)
+            calArlo.stop()
+            time.sleep(1)
 
 try:
     drive_to_landmark()
