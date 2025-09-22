@@ -18,12 +18,19 @@ def main():
         grid, inflated, origin = mapper.build_grid_from_landmarks(landmarks)
 
         start = (0.0, 0.0)      # robot at origin
-        goal = (0.0, 3.0)       # 1.5 m ahead
+        goal = (0.0, 3.0)       # distance ahead (3m)
 
         rrt = RRTPlanner()
         path = rrt.plan(start, goal, mapper, inflated, origin)
 
-        print("RRT path:", path)
+        if path:
+            print("RRT path:", path)
+            mapper.visualize_grid(landmarks, scale=2, save_path="rrt_map.png", path=path)
+            print("Saved rrt_map.png with path overlay")
+        else:
+            print("No path found.")
+            mapper.visualize_grid(landmarks, scale=2, save_path="rrt_map.png")
+
 
         # Optional: drive robot along path
         # for each segment: turn_angle, drive_distance

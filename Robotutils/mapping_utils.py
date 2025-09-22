@@ -29,10 +29,11 @@ class LocalMapper:
 
     # --- (same accumulate_landmarks, collision checks, grid build as before) ---
 
-    def visualize_grid(self, landmarks, scale=2, save_path="local_map.png"):
+    def visualize_grid(self, landmarks, scale=2, save_path="local_map.png", path=None):
         """
         Save local map visualization to a PNG file (no GUI shown).
         White=free, black=landmark, gray=inflation, red circle=origin.
+        If path is given, overlay as a red polyline with green (start) + blue (goal).
         """
         grid, inflated, origin = self.build_grid_from_landmarks(landmarks)
         vis = np.full(grid.shape, 255, np.uint8)
@@ -40,23 +41,36 @@ class LocalMapper:
         vis[(inflated > 0) & (grid == 0)] = 128
         vis = cv2.cvtColor(vis, cv2.COLOR_GRAY2BGR)
 
+    # draw robot at origin
         cv2.circle(vis, (origin[1], origin[0]),
-                   max(1, int(self.robot_radius_m / self.grid_res_m)),
-                   (0, 0, 255), 1)
+                max(1, int(self.robot_radius_m / self.grid_res_m)),
+                (0, 0, 255), 1)
 
+    # draw landmark centers
         for (_, lx, lz, _) in landmarks:
             idx = self._metric_to_idx(lx, lz, origin)
             if idx is not None:
                 cv2.circle(vis, (idx[1], idx[0]), 2, (0, 255, 0), -1)
 
+    # overlay path if provided
+        if path and len(path) > 1:
+            pts = []
+            for (x, z) in path:
+                idx = self._metric_to_idx(x, z, origin)
+                if idx is not None:
+                    pts.append((idx[1], idx[0]))  # (col,row)
+            if len(pts) >= 2:
+                cv2.polylines(vis, [np.array(pts, dtype=np.int32)], False, (0, 0, 255), 1)
+                cv2.circle(vis, pts[0], 3, (0, 255, 0), -1)   # start
+                cv2.circle(vis, pts[-1], 3, (255, 0, 0), -1)  # goal
+
         if scale != 1:
             vis = cv2.resize(vis, (vis.shape[1]*scale, vis.shape[0]*scale),
-                             interpolation=cv2.INTER_NEAREST)
+                            interpolation=cv2.INTER_NEAREST)
 
         cv2.imwrite(save_path, vis)
         return vis
 
-    # --- internal helpers (_make_grid, _metric_to_idx, _stamp_circle_on_grid) ---
 
 
 
