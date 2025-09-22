@@ -15,7 +15,6 @@ aruco = ArucoUtils()
 
 def drive_to_landmark():
     isDriving = False
-    STOP_BUFFER = 0.02
     last_id = None
 
     while True:
@@ -40,7 +39,7 @@ def drive_to_landmark():
                     last_id = marker_id
                     isDriving = False
         else:
-            calArlo.turn_angle(10)
+            calArlo.turn_angle(20)
 
     calArlo.stop()
 
