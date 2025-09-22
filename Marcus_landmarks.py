@@ -33,14 +33,13 @@ def drive_to_landmark():
             
                 calArlo.turn_angle(angle)
             
-                if not isDriving:
+                if not isDriving and marker_id not last_id:
                     isDriving = True
                     calArlo.drive_distance(dist)
                 
                 if dist <= 0:
                     last_id = marker_id
                     isDriving = False
-                    break
         else:
             calArlo.turn_angle(25)
 
