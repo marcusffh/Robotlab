@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from picamera2 import Picamera2
+from picamera2 import Picamera2 ## should only be downloaded onto the raspberry pi, will not run on your own pc
 
 
 
