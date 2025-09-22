@@ -3,7 +3,7 @@ import argparse, time, sys
 import numpy as np
 import cv2
 
-def make_camera(width=1640, height=1232, fps=30):
+def make_camera(width=1920, height=1080, fps=30):
     """Use picamera2 for capture; return (read_fn, release_fn)."""
     from picamera2 import Picamera2
     cam = Picamera2()
