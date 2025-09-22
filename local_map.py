@@ -2,7 +2,7 @@
 import cv2
 from Robotutils.CalibratedRobot import CalibratedRobot
 from Robotutils.CameraDetection_util import CameraUtils, ArucoUtils
-import LocalMapper
+from Robotutils.mapping_utils import LocalMapper 
 
 RES_W, RES_H, FPS = 1640, 1232, 30
 MARKER_LEN_M = 0.14
