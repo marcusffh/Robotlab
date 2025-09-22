@@ -26,8 +26,8 @@ def drive_to_landmark():
         if ids is not None:
             print(f"id found: {ids}")
             rvecs, tvecs = aruco.estimate_pose(corners, cam.camera_matrix)
-            tvec = tvecs[0][0]
-            
+            tvec = tvecs[0]
+                        
             dist = aruco.compute_distance_to_marker(tvec)
             angle = aruco.compute_rotation_to_marker(tvec)
             
