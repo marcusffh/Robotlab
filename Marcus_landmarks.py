@@ -12,8 +12,8 @@ IMG_W, IMG_H, FPS  = 960, 720, 10
 
 # ==== Init Robot + Camera + Aruco ====
 calArlo = CalibratedRobot()
-cam = CameraUtils(width=IMG_W, height=IMG_H)
-cam.start_camera(width=IMG_W, height=IMG_H, fps=FPS)
+cam = CameraUtils()
+cam.start_camera()
 aruco = ArucoUtils()
 
 def drive_to_landmark():
@@ -50,5 +50,8 @@ def drive_to_landmark():
             calArlo.drive(20, 20, calArlo.BACKWARD, calArlo.FORWARD)
             time.sleep(0.35)
             calArlo.stop()
-            
-drive_to_landmark()
+
+try:
+    drive_to_landmark()
+finally:
+    calArlo.stop()
