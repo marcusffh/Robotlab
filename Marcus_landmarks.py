@@ -40,7 +40,6 @@ def drive_to_landmark():
                 isDriving = False
         else:
             calArlo.turn_angle(20)
-
     calArlo.stop()
 
 try:
