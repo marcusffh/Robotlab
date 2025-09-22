@@ -76,7 +76,7 @@ class ArucoUtils:
         return rvecs, tvecs #(Rotation vector, translation vector)
     
     def compute_distance_to_marker(self, tvec, buffer = 0):
-        dist = tvec[2]
+        dist = cv2.norm(tvec)
         dist = max(0, dist)
         return dist
         
