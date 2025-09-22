@@ -40,8 +40,7 @@ def drive_to_landmark():
             if dist <= 0:
                 print("Reached landmark!")
                 calArlo.stop()
-                driving = False
-                break
+                isDriving = False
         else:
             print("finished")
             calArlo.drive(20, 20, calArlo.BACKWARD, calArlo.FORWARD)
