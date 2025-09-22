@@ -15,7 +15,7 @@ aruco = ArucoUtils()
 
 def drive_to_landmark():
     isDriving = False
-    STOP_BUFFER = 0.1
+    STOP_BUFFER = 0.02
     last_id = None
 
     while True:
@@ -40,16 +40,14 @@ def drive_to_landmark():
                     isDriving = True
                     calArlo.drive_distance(dist)
                 
-                if dist <= 0.02:
+                if dist <= 0:
                     last_id = marker_id
                     isDriving = False
                     break
         else:
-            calArlo.drive(20, 20, calArlo.BACKWARD, calArlo.FORWARD)
-            duration = 2.5  # seconds
-            t0 = time.time()
-            while time.time() - t0 < duration:
-                time.sleep(0.01)
+            calArlo.drive(10, 10, calArlo.BACKWARD, calArlo.FORWARD)
+            time.sleep(0.2)
+            calarlo.stop()
 
 try:
     drive_to_landmark()
