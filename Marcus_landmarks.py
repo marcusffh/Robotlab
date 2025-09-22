@@ -39,7 +39,7 @@ def drive_to_landmark():
                 last_id = marker_id
                 isDriving = False
         else:
-            calArlo.turn_angle(20)
+            calArlo.turn_angle(17)
 
     calArlo.stop()
 
