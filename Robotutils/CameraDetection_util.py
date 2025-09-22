@@ -11,7 +11,7 @@ class CameraUtils:
     OpenCV.
     """
     ## Camera calibration
-    def __init__(self, width=1920, height=1080, fx=900, fy=900, cx=None, cy=None, fps = 30):
+    def __init__(self, width=1920, height=1080, fx=2569, fy=2569, cx=None, cy=None, fps = 30):
         self.picam2 = None
         self.width = width #resultion
         self.height = height #resulution
@@ -53,13 +53,10 @@ class CameraUtils:
             self.picam2.stop()
             self.picam2 = None
 
-
-
-
 class ArucoUtils:
     """ Simple utility for detecting ArUco markers and estimating pose. """
     def __init__(self, marker_length=0.14): ## real life height of the aruco
-        self.aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_50) # what kind of arUco markers are we looking for
+        self.aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250) # what kind of arUco markers are we looking for
         self.aruco_params = cv2.aruco.DetectorParameters_create() # Sets parameters for detection algorithm
         self.marker_length = marker_length # sets real life length of aruco marke, 0.14 m in our case
 
@@ -78,10 +75,11 @@ class ArucoUtils:
         ) #Computes 3d pose of of each detected marker
         return rvecs, tvecs #(Rotation vector, translation vector)
     
-    def compute_distance_to_marker(self, tvec):
+    def compute_distance_to_marker(self, tvec, buffer = 0):
         dist = tvec[2]
-        dist = max(dist, 0)  # avoid negative distance
+        dist = max(0, dist)
         return dist
+        
     
     def compute_rotation_to_marker(self, tvec): #mærkelig formel lol
             # Compute angle
