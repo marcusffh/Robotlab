@@ -45,6 +45,7 @@ def drive_to_landmark():
         else:
             print("finished")
             calArlo.drive(20, 20, calArlo.BACKWARD, calArlo.FORWARD)
-            time.sleep(0.25)
+            time.sleep(0.30)
+            calArlo.stop()
             
 drive_to_landmark()
