@@ -8,27 +8,56 @@ import numpy as np
 import cv2
 
 
-class LocalMapper:
-    """
-    Reusable local mapper for landmark-based maps (circle model + occupancy grid).
-    Coordinates: use camera/robot local frame => x right, z forward.
-    """
+# Robotutils/mapping_utils.py
+import time
+import math
+from collections import defaultdict
+import numpy as np
+import cv2
 
+
+class LocalMapper:
     def __init__(self,
                  extent_m: float = 3.0,
                  grid_res_m: float = 0.05,
                  landmark_radius_m: float = 0.09,
                  robot_radius_m: float = 0.12):
-        """
-        extent_m: map covers [-extent,+extent] in both x and z
-        grid_res_m: meters per cell
-        landmark_radius_m: circle approx for each landmark
-        robot_radius_m: robot radius (used for inflation and circle-collision)
-        """
         self.extent_m = float(extent_m)
         self.grid_res_m = float(grid_res_m)
         self.landmark_radius_m = float(landmark_radius_m)
         self.robot_radius_m = float(robot_radius_m)
+
+    # --- (same accumulate_landmarks, collision checks, grid build as before) ---
+
+    def visualize_grid(self, landmarks, scale=2, save_path="local_map.png"):
+        """
+        Save local map visualization to a PNG file (no GUI shown).
+        White=free, black=landmark, gray=inflation, red circle=origin.
+        """
+        grid, inflated, origin = self.build_grid_from_landmarks(landmarks)
+        vis = np.full(grid.shape, 255, np.uint8)
+        vis[grid > 0] = 0
+        vis[(inflated > 0) & (grid == 0)] = 128
+        vis = cv2.cvtColor(vis, cv2.COLOR_GRAY2BGR)
+
+        cv2.circle(vis, (origin[1], origin[0]),
+                   max(1, int(self.robot_radius_m / self.grid_res_m)),
+                   (0, 0, 255), 1)
+
+        for (_, lx, lz, _) in landmarks:
+            idx = self._metric_to_idx(lx, lz, origin)
+            if idx is not None:
+                cv2.circle(vis, (idx[1], idx[0]), 2, (0, 255, 0), -1)
+
+        if scale != 1:
+            vis = cv2.resize(vis, (vis.shape[1]*scale, vis.shape[0]*scale),
+                             interpolation=cv2.INTER_NEAREST)
+
+        cv2.imwrite(save_path, vis)
+        return vis
+
+    # --- internal helpers (_make_grid, _metric_to_idx, _stamp_circle_on_grid) ---
+
 
 
     # Landmark accumulation (camera)
@@ -85,9 +114,9 @@ class LocalMapper:
                 return True
         return False
 
-    # --------------------
+
     # Occupancy grid build
-    # --------------------
+
     def build_grid_from_landmarks(self, landmarks):
         """
         Build occupancy grid and an inflated version (dilated by robot radius).
@@ -117,38 +146,6 @@ class LocalMapper:
         r, c = idx
         return grid_inflated[r, c] > 0
 
-
-    # Visualization
-
-    def visualize_grid(self, landmarks, scale=2, window_name="Local Occupancy Map"):
-        """
-        Quick display: white=free, black=landmark footprint, gray=inflation, red circle at origin.
-        Returns BGR image shown.
-        """
-        grid, inflated, origin = self.build_grid_from_landmarks(landmarks)
-        vis = np.full(grid.shape, 255, np.uint8)
-        vis[grid > 0] = 0
-        vis[(inflated > 0) & (grid == 0)] = 128
-        vis = cv2.cvtColor(vis, cv2.COLOR_GRAY2BGR)
-
-        # draw robot at origin
-        cv2.circle(vis, (origin[1], origin[0]),
-                   max(1, int(self.robot_radius_m / self.grid_res_m)),
-                   (0, 0, 255), 1)
-
-        # draw landmark centers
-        for (_, lx, lz, _) in landmarks:
-            idx = self._metric_to_idx(lx, lz, origin)
-            if idx is not None:
-                cv2.circle(vis, (idx[1], idx[0]), 2, (0, 255, 0), -1)
-
-        if scale != 1:
-            vis = cv2.resize(vis, (vis.shape[1]*scale, vis.shape[0]*scale),
-                             interpolation=cv2.INTER_NEAREST)
-
-        cv2.imshow(window_name, vis)
-        cv2.waitKey(1)
-        return vis
 
 
     # Internal helpers
