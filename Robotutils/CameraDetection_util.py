@@ -11,7 +11,7 @@ class CameraUtils:
     OpenCV.
     """
     ## Camera calibration
-    def __init__(self, width=1920, height=1080, fx=1200, fy=1200, cx=None, cy=None, fps = 30):
+    def __init__(self, width=1920, height=1080, fx=1340, fy=1340, cx=None, cy=None, fps = 30):
         self.picam2 = None
         self.width = width #resultion
         self.height = height #resulution
@@ -78,10 +78,11 @@ class ArucoUtils:
         ) #Computes 3d pose of of each detected marker
         return rvecs, tvecs #(Rotation vector, translation vector)
     
-    def compute_distance_to_marker(self, tvec):
-        dist = tvec[2]
-        dist = max(dist, 0)  # avoid negative distance
+    def compute_distance_to_marker(self, tvec), buffer:
+        dist = np.sqrt(tvec[0]**2 + tvec[2]**2) - STOP_BUFFER
+        dist = max(0, dist)
         return dist
+        
     
     def compute_rotation_to_marker(self, tvec): #mærkelig formel lol
             # Compute angle
