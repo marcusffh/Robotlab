@@ -11,7 +11,7 @@ IMG_W, IMG_H, FPS  = 960, 720, 10
 
 
 # ==== Init Robot + Camera + Aruco ====
-calArlo = CalibratedRobot
+calArlo = CalibratedRobot()
 cam = CameraUtils(width=IMG_W, height=IMG_H)
 cam.start_camera(width=IMG_W, height=IMG_H, fps=FPS)
 aruco = ArucoUtils()
@@ -26,8 +26,8 @@ def drive_to_landmark():
         if ids is not None:
             print(f"id found: {ids}")
             rvecs, tvecs = aruco.estimate_pose(corners, cam.camera_matrix)
-            tvec = tvecs[0]
-                        
+            tvec = tvecs[0][0]
+
             dist = aruco.compute_distance_to_marker(tvec)
             angle = aruco.compute_rotation_to_marker(tvec)
             
