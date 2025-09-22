@@ -4,13 +4,12 @@ from Robotutils.CalibratedRobot import CalibratedRobot
 from Robotutils.CameraDetection_util import CameraUtils, ArucoUtils
 from Robotutils.mapping_utils import LocalMapper 
 
-RES_W, RES_H, FPS = 1640, 1232, 30
-MARKER_LEN_M = 0.14
+
 
 def main():
     bot = CalibratedRobot()
-    cam = CameraUtils(width=RES_W, height=RES_H, fx=1360, fy=1360)
-    aruco = ArucoUtils(marker_length=MARKER_LEN_M)
+    cam = CameraUtils()
+    aruco = ArucoUtils()
     cam.start_camera()
 
     mapper = LocalMapper(
