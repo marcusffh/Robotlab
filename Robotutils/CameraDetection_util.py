@@ -11,7 +11,7 @@ class CameraUtils:
     OpenCV.
     """
     ## Camera calibration
-    def __init__(self, width=1920, height=1080, fx=1340, fy=1340, cx=None, cy=None, fps = 30):
+    def __init__(self, width=1920, height=1080, fx=2569, fy=2569, cx=None, cy=None, fps = 30):
         self.picam2 = None
         self.width = width #resultion
         self.height = height #resulution
@@ -53,9 +53,6 @@ class CameraUtils:
             self.picam2.stop()
             self.picam2 = None
 
-
-
-
 class ArucoUtils:
     """ Simple utility for detecting ArUco markers and estimating pose. """
     def __init__(self, marker_length=0.14): ## real life height of the aruco
@@ -79,7 +76,7 @@ class ArucoUtils:
         return rvecs, tvecs #(Rotation vector, translation vector)
     
     def compute_distance_to_marker(self, tvec, buffer):
-        dist = np.sqrt(tvec[0]**2 + tvec[2]**2) - buffer
+        dist = tvec[2]
         dist = max(0, dist)
         return dist
         

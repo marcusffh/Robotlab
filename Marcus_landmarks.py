@@ -48,3 +48,4 @@ try:
     drive_to_landmark()
 finally:
     calArlo.stop()
+    cam.stop_camera()
