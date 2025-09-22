@@ -78,8 +78,8 @@ class ArucoUtils:
         ) #Computes 3d pose of of each detected marker
         return rvecs, tvecs #(Rotation vector, translation vector)
     
-    def compute_distance_to_marker(self, tvec), buffer:
-        dist = np.sqrt(tvec[0]**2 + tvec[2]**2) - STOP_BUFFER
+    def compute_distance_to_marker(self, tvec, buffer):
+        dist = np.sqrt(tvec[0]**2 + tvec[2]**2) - buffer
         dist = max(0, dist)
         return dist
         
