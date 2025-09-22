@@ -18,7 +18,7 @@ def main():
         grid, inflated, origin = mapper.build_grid_from_landmarks(landmarks)
 
         start = (0.0, 0.0)      # robot at origin
-        goal = (0.0, 1.5)       # 1.5 m ahead
+        goal = (0.0, 3.0)       # 1.5 m ahead
 
         rrt = RRTPlanner()
         path = rrt.plan(start, goal, mapper, inflated, origin)
