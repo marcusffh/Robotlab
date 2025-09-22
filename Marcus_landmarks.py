@@ -46,8 +46,10 @@ def drive_to_landmark():
                     break
         else:
             calArlo.drive(20, 20, calArlo.BACKWARD, calArlo.FORWARD)
-            time.sleep(0.35)
-            calArlo.stop()
+            duration = 2.5  # seconds
+            t0 = time.time()
+            while time.time() - t0 < duration:
+                time.sleep(0.01)
 
 try:
     drive_to_landmark()
