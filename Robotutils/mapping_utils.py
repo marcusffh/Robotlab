@@ -20,7 +20,7 @@ class LocalMapper:
     def __init__(self,
                  extent_m: float = 5.0,
                  grid_res_m: float = 0.05,
-                 landmark_radius_m: float = 0.17,
+                 landmark_radius_m: float = 0.2,
                  robot_radius_m: float = 0.23):
         self.extent_m = float(extent_m)
         self.grid_res_m = float(grid_res_m)
