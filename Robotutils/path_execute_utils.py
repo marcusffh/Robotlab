@@ -1,6 +1,6 @@
 # Robotutils/path_exec_utils.py
 from math import atan2, hypot, pi
-from CalibratedRobot import CalibratedRobot
+from Robotutils.CalibratedRobot import CalibratedRobot
 
 def _wrap_to_pi(a):
     while a >  pi: a -= 2*pi
