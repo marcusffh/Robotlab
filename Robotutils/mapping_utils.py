@@ -21,7 +21,7 @@ class LocalMapper:
                  extent_m: float = 5.0,
                  grid_res_m: float = 0.05,
                  landmark_radius_m: float = 0.15,
-                 robot_radius_m: float = 0.15):
+                 robot_radius_m: float = 0.20):
         self.extent_m = float(extent_m)
         self.grid_res_m = float(grid_res_m)
         self.landmark_radius_m = float(landmark_radius_m)
