@@ -13,7 +13,7 @@ def main():
 
     mapper = LocalMapper()
     try:
-        # Sense & build local occupancy map 
+        # build local occupancy map 
         landmarks = mapper.accumulate_landmarks(cam, aruco)
         grid, inflated, origin = mapper.build_grid_from_landmarks(landmarks)
 

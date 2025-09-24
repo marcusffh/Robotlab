@@ -20,14 +20,13 @@ class LocalMapper:
     def __init__(self,
                  extent_m: float = 5.0,
                  grid_res_m: float = 0.05,
-                 landmark_radius_m: float = 0.15,
-                 robot_radius_m: float = 0.20):
+                 landmark_radius_m: float = 0.17,
+                 robot_radius_m: float = 0.23):
         self.extent_m = float(extent_m)
         self.grid_res_m = float(grid_res_m)
         self.landmark_radius_m = float(landmark_radius_m)
         self.robot_radius_m = float(robot_radius_m)
 
-    # --- (same accumulate_landmarks, collision checks, grid build as before) ---
 
     def visualize_grid(self, landmarks, scale=2, save_path="local_map.png", path=None):
         """

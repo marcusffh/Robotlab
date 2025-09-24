@@ -10,10 +10,10 @@ def _wrap_to_pi(a):
 def execute_path(
     bot,
     path,
-    drive_speed=64,       # 0..127, your default is 64
-    turn_speed=64,        # 0..127
+    drive_speed=64,      
+    turn_speed=64,    
     heading_tol_deg=5.0,  # don't turn if within this tolerance
-    min_seg_len=0.05,     # skip very short segments (m)
+    min_seg_len=0.05,     # skip very short segments
     settle_s=0.05         # small pause after each move
 ):
     """
@@ -41,7 +41,7 @@ def execute_path(
             if seg_len < min_seg_len:
                 continue
 
-            # 1) Turn to face the segment
+            # Turn to face the segment
             desired = atan2(dz, dx)                 # absolute desired heading
             dtheta = _wrap_to_pi(desired - heading) # turn needed
             dtheta_deg = dtheta * 180.0 / pi
@@ -50,7 +50,7 @@ def execute_path(
                 heading = _wrap_to_pi(heading + dtheta)
                 time.sleep(settle_s)
 
-            # 2) Drive straight the segment length
+            # Drive straight the segment length
             bot.drive_distance(seg_len, direction=bot.FORWARD, speed=drive_speed)
             time.sleep(settle_s)
 
