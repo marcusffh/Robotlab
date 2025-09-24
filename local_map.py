@@ -15,8 +15,8 @@ def main():
     mapper = LocalMapper(
         extent_m=3.0,
         grid_res_m=0.05,
-        landmark_radius_m=0.09,
-        robot_radius_m=0.12
+        landmark_radius_m=0.15,
+        robot_radius_m=0.22
     )
 
     try:
