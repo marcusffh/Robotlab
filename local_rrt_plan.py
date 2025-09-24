@@ -19,7 +19,7 @@ def main():
 
         # Plan with local RRT 
         start = (0.0, 0.0)      # robot at origin
-        goal  = (0.0, 4.0)      # keep within extent
+        goal  = (0.0, 4.5)      # keep within extent
         rrt = RRTPlanner(step_size=0.20, max_iters=1500, goal_sample_rate=0.15, goal_radius=0.25)
         path = rrt.plan(start, goal, mapper, inflated, origin)
 
