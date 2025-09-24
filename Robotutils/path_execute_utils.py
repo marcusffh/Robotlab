@@ -32,7 +32,7 @@ def execute_path(
         return
 
     import time
-    heading = 0.0  # internal estimate in radians
+    heading = pi/2 # internal estimate in radians
 
     try:
         for (x0, z0), (x1, z1) in zip(path[:-1], path[1:]):
