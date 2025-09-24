@@ -93,6 +93,7 @@ class LocalMapper:
             corners, ids = aruco_utils.detect_markers(frame_bgr)
             if ids is not None and len(ids) > 0:
                 rvecs, tvecs = aruco_utils.estimate_pose(corners, K, dist_coeffs=dist)
+                #compute_box_center
                 for i in range(len(ids)):
                     t = tvecs[i, 0, :]  # (tx, ty, tz) in meters (camera frame)
                     x_m, z_m = float(t[0]), float(t[2])

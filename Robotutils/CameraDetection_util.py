@@ -86,10 +86,16 @@ class ArucoUtils:
         return angle
     
     def compute_box_center(self, rvec, tvec, offset_m=0.15):
-        R, _ = cv2.Rodrigues(rvec)              # marker orientation
-        t = tvec.reshape(3, 1)                  # marker position
-        offset = offset_m * R[:, 2].reshape(3, 1)  # move along marker normal
-        box_center = t + offset
+
+        # Convert rotation vector to rotation matrix
+        R, _ = cv2.Rodrigues(rvec) 
+
+        # Offset along the marker's z-axis (normal)
+        offset = offset_m * R[:, 2]  # still shape (3,)
+
+        # Add offset to marker center
+        box_center = tvec + offset  # shape (3,), same as tvec
+
         return box_center
 
         
