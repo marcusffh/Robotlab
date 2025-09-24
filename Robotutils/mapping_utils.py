@@ -30,7 +30,7 @@ class LocalMapper:
 
     def visualize_grid(self, landmarks, scale=2, save_path="local_map.png", path=None):
         """
-        Save local map visualization to a PNG file (no GUI shown).
+        Save local map visualization to a PNG file
         White=free, black=landmark, gray=inflation, red circle=origin.
         If path is given, overlay as a red polyline with green (start) + blue (goal).
         """
@@ -94,6 +94,7 @@ class LocalMapper:
                 for i in range(len(ids)):
                     t = tvecs[i, 0, :]  # (tx, ty, tz) in meters (camera frame)
                     x_m, z_m = float(t[0]), float(t[2])
+                    z_m -= 0.12
                     d = float(np.linalg.norm(t))
                     buf[int(ids[i][0])].append((x_m, z_m, d))
             time.sleep(sleep_s)

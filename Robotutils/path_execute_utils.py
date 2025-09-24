@@ -12,7 +12,7 @@ def execute_path(
     path,
     drive_speed=64,      
     turn_speed=64,    
-    heading_tol_deg=5.0,  # don't turn if within this tolerance
+    heading_tol_deg=3.0,  # don't turn if within this tolerance
     min_seg_len=0.05,     # skip very short segments
     settle_s=0.05         # small pause after each move
 ):
@@ -32,7 +32,9 @@ def execute_path(
         return
 
     import time
-    heading = pi/2 # internal estimate in radians
+    heading = 0.0
+               # swap args: angle from +z
+ # internal estimate in radians
 
     try:
         for (x0, z0), (x1, z1) in zip(path[:-1], path[1:]):
@@ -42,7 +44,7 @@ def execute_path(
                 continue
 
             # Turn to face the segment
-            desired = atan2(dz, dx)                 # absolute desired heading
+            desired = atan2(dx, dz)                 # absolute desired heading
             dtheta = _wrap_to_pi(desired - heading) # turn needed
             dtheta_deg = dtheta * 180.0 / pi
             if abs(dtheta_deg) > heading_tol_deg:
