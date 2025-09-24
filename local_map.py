@@ -13,7 +13,7 @@ def main():
     cam.start_camera()
 
     mapper = LocalMapper(
-        extent_m=3.0,
+        extent_m=5.0,
         grid_res_m=0.05,
         landmark_radius_m=0.15,
         robot_radius_m=0.22
