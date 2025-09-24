@@ -94,6 +94,7 @@ class LocalMapper:
                 #compute_box_center
                 for i in range(len(ids)):
                     t = tvecs[i, 0, :]  # (tx, ty, tz) in meters (camera frame)
+                    # box_center = aruco_utils.compute_box_center(rvecs[i, 0, :].ravel(), t.ravel(), offset_m=0.15)  # Uncomment to use box center instead of marker center
                     x_m, z_m = float(t[0]), float(t[2])
                     z_m -= 0.12
                     d = float(np.linalg.norm(t))
