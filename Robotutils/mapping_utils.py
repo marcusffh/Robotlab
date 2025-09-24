@@ -18,7 +18,7 @@ import cv2
 
 class LocalMapper:
     def __init__(self,
-                 extent_m: float = 3.0,
+                 extent_m: float = 5.0,
                  grid_res_m: float = 0.05,
                  landmark_radius_m: float = 0.15,
                  robot_radius_m: float = 0.15):
