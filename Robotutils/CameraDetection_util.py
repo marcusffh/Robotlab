@@ -81,9 +81,17 @@ class ArucoUtils:
         
     
     def compute_rotation_to_marker(self, tvec): #mærkelig formel lol
-            # Compute angle
-            angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))
-            return angle
+        # Compute angle
+        angle = -np.degrees(np.arctan2(tvec[0], tvec[2]))
+        return angle
+    
+    def compute_box_center(self, rvec, tvec, offset_m=0.15):
+        R, _ = cv2.Rodrigues(rvec)              # marker orientation
+        t = tvec.reshape(3, 1)                  # marker position
+        offset = offset_m * R[:, 2].reshape(3, 1)  # move along marker normal
+        box_center = t + offset
+        return box_center
+
         
 
 

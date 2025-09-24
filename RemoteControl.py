@@ -6,8 +6,8 @@ def RobotController(stdscr): ## stdscr is used to write text to the terminal
     robot = CalibratedRobot()
     speed = robot.default_speed # refers to calibrated Robot
 
-    step_distance = 0.1 ## Meters
-    step_angle = 15 # Degrees
+    step_distance = 0.15 ## Meters
+    step_angle = 10 # Degrees
 
     stdscr.nodelay(True)  # Makes sure the program doesnt freeze waiting for a key
     stdscr.clear()
