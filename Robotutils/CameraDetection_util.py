@@ -55,7 +55,7 @@ class CameraUtils:
 
 class ArucoUtils:
     """ Simple utility for detecting ArUco markers and estimating pose. """
-    def __init__(self, marker_length=0.14): ## real life height of the aruco
+    def __init__(self, marker_length=0.145): ## real life height of the aruco
         self.aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250) # what kind of arUco markers are we looking for
         self.aruco_params = cv2.aruco.DetectorParameters_create() # Sets parameters for detection algorithm
         self.marker_length = marker_length # sets real life length of aruco marke, 0.14 m in our case
@@ -75,9 +75,8 @@ class ArucoUtils:
         ) #Computes 3d pose of of each detected marker
         return rvecs, tvecs #(Rotation vector, translation vector)
     
-    def compute_distance_to_marker(self, tvec, buffer = 0):
+    def compute_distance_to_marker(self, tvec):
         dist = cv2.norm(tvec)
-        dist = max(0, dist)
         return dist
         
     
