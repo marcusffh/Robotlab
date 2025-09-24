@@ -21,13 +21,11 @@ class LocalMapper:
                  extent_m: float = 5.0,
                  grid_res_m: float = 0.05,
                  landmark_radius_m: float = 0.15,
-                 robot_radius_m: float = 0.22,
-                safety_buffer_m: float = 0.08):
+                 robot_radius_m: float = 0.22):
         self.extent_m = float(extent_m)
         self.grid_res_m = float(grid_res_m)
         self.landmark_radius_m = float(landmark_radius_m)
         self.robot_radius_m = float(robot_radius_m)
-        self.safety_buffer_m = float(safety_buffer_m)
 
 
     def visualize_grid(self, landmarks, scale=2, save_path="local_map.png", path=None):
@@ -142,13 +140,12 @@ class LocalMapper:
             self._stamp_circle_on_grid(grid, origin, lx, lz, self.landmark_radius_m)
 
         # Inflate by robot radius using morphological dilation
-        inflate_cells = int(math.ceil(
-            (self.robot_radius_m + self.landmark_radius_m + self.safety_buffer_m) / self.grid_res_m
-        ))
-        ksz = 2*inflate_cells + 1
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksz, ksz))
+        kernel_diam_cells = max(1, int(round(2 * self.robot_radius_m / self.grid_res_m)))
+        if kernel_diam_cells % 2 == 0:
+            kernel_diam_cells += 1  # make odd
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                           (kernel_diam_cells, kernel_diam_cells))
         inflated = cv2.dilate(grid, kernel)
-
         return grid, inflated, origin
 
     def collision_grid_map(self, point_xz, grid_inflated, origin_idx):
