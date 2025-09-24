@@ -3,7 +3,7 @@ from Robotutils.CameraDetection_util import CameraUtils, ArucoUtils
 from Robotutils.CalibratedRobot import CalibratedRobot
 from Robotutils.mapping_utils import LocalMapper
 from Robotutils.rrt_utils import RRTPlanner, smooth_path
-from Robotutils.path_exec_utils import execute_path  
+from Robotutils.path_execute_utils import execute_path
 
 def main():
     bot = CalibratedRobot()
