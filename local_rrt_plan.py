@@ -49,7 +49,7 @@ def main():
                 path_to_run,
                 drive_speed=64,
                 turn_speed=64,
-                heading_tol_deg=5.0,
+                heading_tol_deg=3.0,
                 min_seg_len=0.05,
                 settle_s=0.05
             )
