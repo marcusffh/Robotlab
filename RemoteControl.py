@@ -1,68 +1,68 @@
-import keyboard #library that easily lets me use keyboard imput in terminal
+import curses ### 3rd library option. The others either wont work over linux, or not over a ssh connection. This one should work!!!!!
 from Robotutils.CalibratedRobot import CalibratedRobot
 import time
 
-def RobotController():
+def RobotController(stdscr): ## stdscr is used to write text to the terminal
     robot = CalibratedRobot()
     speed = robot.default_speed # refers to calibrated Robot
 
     step_distance = 0.1 ## Meters
-    step_angle = 15 # Degress
+    step_angle = 15 # Degrees
 
-    print("Please use the arrow keys to control the robot")
-    print("Press q to terminate the program")
+    stdscr.nodelay(True)  # Makes sure the program doesnt freeze waiting for a key
+    stdscr.clear()
+    stdscr.addstr(0, 0, "Please use the arrow keys to control the robot")
+    stdscr.addstr(1, 0, "Press q to terminate the program")
+    stdscr.refresh()
 
     try:
         while True:
-            if keyboard.is_pressed('q'):
+            key = stdscr.getch() ##gets the next key pressed
+
+            if key == ord('q'): ## Terminate the program by typing q
                 break
 
-            #Continuous forward
-            if keyboard.is_pressed('up'):
+            # Continuous forward
+            elif key == curses.KEY_UP:
                 robot.drive(speed, speed, robot.FORWARD, robot.FORWARD)
-                while keyboard.is_pressed('up'):
-                    time.sleep(0.05)
+                time.sleep(0.1)
                 robot.stop()
                 # Short press
-                if not keyboard.is_pressed('up'):
-                    robot.drive_distance(step_distance, direction=robot.FORWARD, speed=speed)
+                robot.drive_distance(step_distance, direction=robot.FORWARD, speed=speed)
 
             # Continuous backwards
-            elif keyboard.is_pressed('down'):
+            elif key == curses.KEY_DOWN:
                 robot.drive(speed, speed, robot.BACKWARD, robot.BACKWARD)
-                while keyboard.is_pressed('down'):
-                    time.sleep(0.05)
+                time.sleep(0.1)
                 robot.stop()
-                if not keyboard.is_pressed('down'):
-                    robot.drive_distance(step_distance, direction=robot.BACKWARD, speed=speed)
+                # Short press
+                robot.drive_distance(step_distance, direction=robot.BACKWARD, speed=speed)
 
             # Continuous left
-            elif keyboard.is_pressed('left'):
+            elif key == curses.KEY_LEFT:
                 robot.drive(speed, speed, robot.BACKWARD, robot.FORWARD)
-                while keyboard.is_pressed('left'):
-                    time.sleep(0.05)
+                time.sleep(0.1)
                 robot.stop()
                 # Short press
-                if not keyboard.is_pressed('left'):
-                    robot.turn_angle(step_angle, speed=speed)
+                robot.turn_angle(step_angle, speed=speed)
 
             # Continuous right
-            elif keyboard.is_pressed('right'):
+            elif key == curses.KEY_RIGHT:
                 robot.drive(speed, speed, robot.FORWARD, robot.BACKWARD)
-                while keyboard.is_pressed('right'):
-                    time.sleep(0.05)
+                time.sleep(0.1)
                 robot.stop()
                 # Short press
-                if not keyboard.is_pressed('right'):
-                    robot.turn_angle(-step_angle, speed=speed)
+                robot.turn_angle(-step_angle, speed=speed)
+
             else:
                 robot.stop()
-                time.sleep(0.05)
+
+            time.sleep(0.1)
 
     except KeyboardInterrupt:
-        print("Afslutter...")
+        stdscr.addstr(3, 0, "Interrupted by user")
     finally:
         robot.stop()
 
 if __name__ == "__main__":
-    RobotController()
+    curses.wrapper(RobotController)
