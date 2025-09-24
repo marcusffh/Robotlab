@@ -1,7 +1,7 @@
 # local_rrt_plan.py
 from Robotutils.CameraDetection_util import CameraUtils, ArucoUtils
 from Robotutils.CalibratedRobot import CalibratedRobot
-import LocalMapper
+from mapping_utils import LocalMapper
 import RRTPlanner, smooth_path
 import execute_path
 
