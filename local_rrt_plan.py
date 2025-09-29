@@ -34,7 +34,7 @@ def main():
                 step_m=0.03,       # collision sampling along shortcuts
                 min_turn_deg=15,   # raise for fewer waypoints
                 min_seg_len=0.12,  # skip tiny segments
-                rounds=3
+                rounds=5
             )
             print("Smoothed path:", smoothed)
             mapper.visualize_grid(landmarks, scale=2, save_path="rrt_map_smoothed.png", path=smoothed)
