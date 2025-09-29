@@ -11,7 +11,7 @@ def main():
     aruco = ArucoUtils()
     cam.start_camera()
 
-    mapper = LocalMapper()
+    mapper = LocalMapper(robot_radius_m=0.12 + 0.10 + 0.05)
     try:
         # build local occupancy map 
         landmarks = mapper.accumulate_landmarks(cam, aruco)
