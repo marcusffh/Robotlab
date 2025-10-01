@@ -5,7 +5,7 @@ import numpy as np
 import time
 from timeit import default_timer as timer
 import sys
-from Robotutils.CalibratedRobot import CalibratedRobot 
+#from Robotutils.CalibratedRobot import CalibratedRobot 
 
 
 # Flags
