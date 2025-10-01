@@ -1,5 +1,5 @@
 import cv2
-import particle
+import Robotics.Robotlab.particle as particle
 import camera
 import numpy as np
 import time
