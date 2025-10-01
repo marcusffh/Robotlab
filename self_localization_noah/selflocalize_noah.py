@@ -51,6 +51,7 @@ DRIVE_SPEED   = 50
 DRIVE_STEP_M  = 0.25        # forward segment length
 DIST_TOL      = 0.15        # stop when within 15 cm of midpoint
 MAX_SECONDS   = 240         # overall safety timeout
+SCAN_SETTLE_TIME = 0.3 
 
 # Timing for non-blocking PF updates between commands
 LOOP_HZ       = 10.0
@@ -121,6 +122,7 @@ def phase_scan_until_seen_both(arlo: CalibratedRobot, cam: LandmarkCamera, parti
     while time.time() - start < 60.0:
         # 1) Turn a small step
         arlo.turn_angle(+SCAN_STEP_DEG, speed=TURN_SPEED)
+        time.sleep(SCAN_SETTLE_TIME)    
         commanded_predict_turn(particles, arlo, +SCAN_STEP_DEG, speed=TURN_SPEED)
 
         # 2) Single measurement update after the turn
