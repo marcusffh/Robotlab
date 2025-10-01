@@ -1,5 +1,5 @@
 import cv2
-import particle
+from self_localise import particle
 import camera
 import numpy as np
 import time
