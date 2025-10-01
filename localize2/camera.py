@@ -4,14 +4,13 @@ import time
 import sys
 import threading
 import framebuffer
-from picamera2 import Picamera2
 
 
 gstreamerCameraFound = False
 piCameraFound = False
 piCamera2Found = False
 try:
-    import picamera2
+    import picamera
     from picamera.array import PiRGBArray
     piCameraFound = True
     print("Camera.py: Using picamera module")
