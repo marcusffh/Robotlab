@@ -1,13 +1,11 @@
 import cv2
-import Robotics.Robotlab.particle as particle
+import particle
 import camera
 import numpy as np
 import time
 from timeit import default_timer as timer
 import sys
-from RobotUtils.CalibratedRobot import CalibratedRobot
-import norm
-import math
+
 
 # Flags
 showGUI = True  # Whether or not to open GUI windows
@@ -54,6 +52,10 @@ landmarks = {
     2: (300.0, 0.0)  # Coordinates for landmark 2
 }
 landmark_colors = [CRED, CGREEN] # Colors used when drawing the landmarks
+
+
+
+
 
 def jet(x):
     """Colour map for drawing particles. This function determines the colour of 
@@ -116,58 +118,6 @@ def initialize_particles(num_particles):
 
     return particles
 
-def sample_motion_model(particle_list, velocity, angular_velocity, sigma_d=2, sigma_theta=0.05):
-    for p in particle_list:
-       
-        p.move_particle(p, delta_x, delta_y, delta_theta)
-    
-    particle.add_uncertainty(particle_list, sigma_d, sigma_theta)
-
-
-
-def measurement_model(particle_list, landmarkIDs, dists, angles, sigma_d = 20, sigma_theta = 20):
-    for particle in particle_list:
-        x_i = particle.getX()
-        y_i = particle.getY()
-        theta_i = particle.getTheta()
-
-        p_observation_given_x = 1.0
-
-        #p(z|x) = sum over the probability for all landmarks
-        for landmarkID, dist, angle in zip(landmarkIDs, dists, angles):
-            l_x, l_y = landmarks[landmarkID]
-            d_i = np.sqrt((l_x - x_i)**2 + (l_y - y_i)**2)
-
-            p_d_m = norm.pdf(dist, loc=d_i, scale=sigma_d)
-
-            e_theta = np.array([np.cos(theta_i), np.sin(theta_i)])
-            e_theta_hat = np.array([-np.sin(theta_i), np.cos(theta_i)])
-
-            e_l = np.array([l_x - x_i, l_y - y_i]) / d_i
-
-            phi_i = np.sign(np.dot(e_l, e_theta_hat)) * np.arccos(np.dot(e_l, e_theta))
-            
-            p_phi_m = norm.pdf(angle,loc=phi_i, scale=sigma_theta)
-
-
-            p_observation_given_x *= p_d_m* p_phi_m
-
-        particle.setWeight(p_observation_given_x)
-
-def resample_particles(particle_list):
-    weights = np.array([p.getWeight() for p in particles])
-    weights /= np.sum(weights)
-
-    cdf = np.sum(weights)
-
-    resampled = []
-    for _ in range(len(particle_list)):
-        z = np.random.rand()
-        idx = np.searchsorted(cdf, z)
-        p_resampled = particle(particles[idx].getX(), particles[idx].getY(), particles[idx].getTheta(), 1.0/(len(particle_list)))
-        resampled.append(p_resampled)
-
-    return resampled
 
 # Main program #
 try:
@@ -193,8 +143,6 @@ try:
     angular_velocity = 0.0 # radians/sec
 
     # Initialize the robot (XXX: You do this)
-    if isRunningOnArlo:
-        arlo = CalibratedRobot()
 
     # Allocate space for world map
     world = np.zeros((500,500,3), dtype=np.uint8)
@@ -211,6 +159,7 @@ try:
         cam = camera.Camera(1, robottype='macbookpro', useCaptureThread=False)
 
     while True:
+
         # Move the robot according to user input (only for testing)
         action = cv2.waitKey(10)
         if action == ord('q'): # Quit
@@ -230,9 +179,13 @@ try:
                 angular_velocity -= 0.2
 
 
-        # Use motor controls to update particles
-        sample_motion_model(particles, velocity, angular_velocity)
+
         
+        # Use motor controls to update particles
+        # XXX: Make the robot drive
+        # XXX: You do this
+
+
         # Fetch next frame
         colour = cam.get_next_frame()
         
@@ -245,10 +198,10 @@ try:
                 # XXX: Do something for each detected object - remember, the same ID may appear several times
 
             # Compute particle weights
-            measurement_model(particles, objectIDs, dists, angles)
+            # XXX: You do this
 
             # Resampling
-            particles = resample_particles(particles)
+            # XXX: You do this
 
             # Draw detected objects
             cam.draw_aruco_objects(colour)
@@ -279,4 +232,3 @@ finally:
 
     # Clean-up capture thread
     cam.terminateCaptureThread()
-
