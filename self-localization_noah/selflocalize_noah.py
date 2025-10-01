@@ -1,8 +1,18 @@
 # selflocalize_noah.py
-import time, math
-from Robotutils.robot import robot 
-from particle_noah import ParticleFilterNoah, wrap_pi
-from camera_noah import compress_duplicates_by_id
+# Path setup so imports match the Robotlab repo layout precisely.
+import os, sys, time, math
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
+sys.path.insert(0, REPO_ROOT)                                  # Robotutils/
+HANDOUT_DIR = os.path.join(REPO_ROOT, "self-localization")
+sys.path.insert(0, HANDOUT_DIR)                                 # camera.py (folder has a hyphen)
+
+from Robotutils import robot                                    # Robotutils/robot.py
+from camera import Camera                                       # self-localization/camera.py (handout)
+from self_localization_noah.particle_noah import ParticleFilterNoah, wrap_pi
+from self_localization_noah.camera_noah import compress_duplicates_by_id
+
 
 LANDMARKS = {
     9: (0.0, 0.0),
