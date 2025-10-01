@@ -3,7 +3,7 @@ import numpy as np
 import time
 import sys
 import threading
-from framebuffer import framebuffer
+import framebuffer
 
 
 gstreamerCameraFound = False
