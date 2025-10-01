@@ -15,7 +15,7 @@ import time
 import numpy as np
 
 # --- Robot: use your calibrated wrapper -------------------------------------
-from Robotutils.Calibratedrobot import CalibratedRobot
+from Robotutils.CalibratedRobot import CalibratedRobot
 
 # --- Our PF + camera wrappers ------------------------------------------------
 from .camera_noah import LandmarkCamera
