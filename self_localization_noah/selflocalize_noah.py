@@ -5,6 +5,8 @@ Shows two windows:
   - "Camera": PiCam feed with ArUco detections
   - "PF": particle filter map (landmarks, particles, estimate)
 """
+import os
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 import math, time, numpy as np, cv2
 from Robotutils.CalibratedRobot import CalibratedRobot
