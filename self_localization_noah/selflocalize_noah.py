@@ -93,49 +93,60 @@ def commanded_predict(particles, v, omega, dt):
 
 
 # ---------------------- main phases ------------------------------------------
-def phase_scan_until_seen_both(cam, particles):
+def phase_scan_until_seen_both(arlo, cam, particles, spin_dir:+int = +1):
     """
-    Spin slowly and run PF with only prediction+measurement,
-    until both landmark IDs have been observed at least once.
+    Physically spin in place while updating PF until both landmark IDs are seen.
+    spin_dir: +1 = left (CCW), -1 = right (CW)
     """
     print("[SCAN] Starting spin to see both landmarks ...")
     seen = set()
     last_report = time.time()
-
     start = time.time()
-    while time.time() - start < 60.0:  # cap scan phase at 60s
-        # Predict with a pure rotation command (use omega sign to turn left)
-        commanded_predict(particles, v=0.0, omega=SCAN_OMEGA, dt=DT)
 
+    duty = 6 if spin_dir >= 0 else -6  # small, steady pulse
+    while time.time() - start < 60.0:  # cap scan phase at 60s
+        # 1) Command a tiny rotation pulse
+        try:
+            # If your robot.turn(duty) feels too weak on your floor, use the drive fallback:
+            # arlo.drive(25, -25)   # uncomment instead of arlo.turn(...)
+            arlo.turn(duty)
+        except Exception:
+            # Fallback if turn() is unavailable
+            arlo.drive(25, -25)
+
+        # 2) PF predict with a matching commanded angular velocity
+        commanded_predict(particles, v=0.0, omega=SCAN_OMEGA * spin_dir, dt=DT)
+
+        # 3) Camera update
         dets = cam.read()
         for (lid, r, b) in dets:
             if lid in LANDMARKS:
                 seen.add(lid)
 
-        # Weight/resample even during scan to help convergence
+        # 4) Weight / resample
         w = weight(particles, dets, LANDMARKS, SIGMA_R, SIGMA_B)
         ess = effective_sample_size(w)
         if ess < 0.5 * len(particles):
             particles[:] = resample_systematic(particles, w, RECOVERY_FRAC, BOUNDS_XY, THETA_RANGE)
             w = np.ones(len(particles), dtype=np.float32) / len(particles)
 
-        # Console feedback
+        # 5) Progress print
         now = time.time()
         if now - last_report > 1.0:
             est = estimate_pose(particles, w)
             print(f"[SCAN] Seen IDs: {sorted(seen)} | ESS={ess:.1f} | est=({est[0]:.2f},{est[1]:.2f},{est[2]:.2f})")
             last_report = now
 
-        # stop condition
+        # 6) Stop condition
         if all(lid in seen for lid in LANDMARKS.keys()):
             print("[SCAN] Both landmarks seen. Proceeding.")
             return True
 
-        # physically spin a little (non-blocking-ish)
         time.sleep(DT)
 
     print("[SCAN] Timeout without seeing both landmarks.")
     return False
+
 
 
 def phase_drive_to_midpoint(arlo, cam, particles):
@@ -220,7 +231,7 @@ def main():
     particles = init_particles(N_PARTICLES, BOUNDS_XY, THETA_RANGE)
 
     try:
-        ok = phase_scan_until_seen_both(cam, particles)
+        ok = phase_scan_until_seen_both(arlo, cam, particles)
         if not ok:
             print("[MAIN] Could not see both landmarks. Exiting.")
             return
