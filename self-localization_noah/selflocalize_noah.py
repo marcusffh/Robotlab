@@ -1,6 +1,6 @@
 # selflocalize_noah.py
 import time, math
-from Robotutils import robot 
+from Robotutils.robot import robot 
 from particle_noah import ParticleFilterNoah, wrap_pi
 from camera_noah import compress_duplicates_by_id
 
