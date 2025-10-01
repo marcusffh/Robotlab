@@ -1,246 +1,220 @@
 #!/usr/bin/env python3
 """
-selflocalize_noah.py
-- Full loop: spin to see both landmarks -> MCL converge -> drive to midpoint.
-- Uses commanded motion as odometry for PF predict.
-- Keep commands gentle (small step-and-update) for stability on Arlo.
+selflocalize_noah.py  —  Exercise 5 (MCL) using CalibratedRobot
+- Scan (small calibrated turns) until both landmarks are seen
+- Run particle filter (predict, weight, resample, estimate)
+- Drive to the midpoint between the two landmarks with short, calibrated segments
+- Uses your Robotutils/Calibratedrobot.py so motion commands are in meters/degrees
 
-Run:
+Run from repo root:
   python3 -m self_localization_noah.selflocalize_noah
 """
 
 import math
 import time
-from collections import deque
-
-# --- Your repo robot import (with fallback) ----------------------------------
-try:
-    from Robotutils import robot as robot_mod
-except Exception:
-    import robot as robot_mod  # fallback if run from top-level
-
 import numpy as np
 
+# --- Robot: use your calibrated wrapper -------------------------------------
+from Robotutils.Calibratedrobot import CalibratedRobot
+
+# --- Our PF + camera wrappers ------------------------------------------------
 from .camera_noah import LandmarkCamera
 from .particle_noah import (
     init_particles, predict, weight, resample_systematic,
     estimate_pose, effective_sample_size
 )
 
-# ---------------------- CONFIG (edit for your room) --------------------------
-# Known landmark world poses in meters (IDs must match your ArUco)
+
+# ---------------------- CONFIG (edit to your setup) --------------------------
+# Known landmark world poses in meters (IDs must match your ArUco markers)
 LANDMARKS = {
-    10: (0.0, 0.0),
-    20: (3.0, 0.0),
+    9: (0.0, 0.0),
+    11: (3.0, 0.0),
 }
-TARGET = ((LANDMARKS[10][0] + LANDMARKS[20][0]) * 0.5,
-          (LANDMARKS[10][1] + LANDMARKS[20][1]) * 0.5)
+TARGET = ((LANDMARKS[9][0] + LANDMARKS[11][0]) * 0.5,
+          (LANDMARKS[9][1] + LANDMARKS[11][1]) * 0.5)
 
 # Particle filter config
 N_PARTICLES   = 500
-BOUNDS_XY     = ((-0.5, 3.5), (-1.0, 1.0))   # prior area (m) – tweak to your field
+BOUNDS_XY     = ((-0.5, 3.5), (-1.0, 1.0))   # prior area (m)
 THETA_RANGE   = (-math.pi, math.pi)
-SIGMA_TRANS   = 0.20        # motion noise scale (m per 1 m step) – start loose
-SIGMA_ROT     = 0.20        # motion noise scale for angles
-SIGMA_R       = 0.10        # measurement noise: range (m)
-SIGMA_B       = 0.10        # measurement noise: bearing (rad)
+SIGMA_TRANS   = 0.20        # motion noise scale (per 1 m)
+SIGMA_ROT     = 0.20        # motion angular noise scale
+SIGMA_R       = 0.10        # meas noise: range (m)
+SIGMA_B       = 0.10        # meas noise: bearing (rad)
 RECOVERY_FRAC = 0.05
 
-# Control
-SCAN_OMEGA    = 0.35        # rad/s spin speed
-FWD_SPEED     = 0.25        # m/s (commanded)
-TURN_SPEED    = 0.35        # rad/s (commanded)
-SEG_LEN       = 0.25        # meters per forward segment before re-localizing
-HEADING_KP    = 1.0         # proportional turn on heading error
-DIST_TOL      = 0.15        # stop within 15 cm
-MAX_SECONDS   = 240         # safety
+# Controller / step sizes
+SCAN_STEP_DEG = 20.0        # per scan increment (deg)
+TURN_SPEED    = 50          # CalibratedRobot speed units (0..127); lower = smoother
+DRIVE_SPEED   = 50
+DRIVE_STEP_M  = 0.25        # forward segment length
+DIST_TOL      = 0.15        # stop when within 15 cm of midpoint
+MAX_SECONDS   = 240         # overall safety timeout
 
-# Timing
+# Timing for non-blocking PF updates between commands
 LOOP_HZ       = 10.0
 DT            = 1.0 / LOOP_HZ
 
 
-# ---------------------- small helpers ----------------------------------------
-def angle_wrap(a):
+# ---------------------- helpers ----------------------------------------------
+def angle_wrap(a: float) -> float:
     return (a + math.pi) % (2.0 * math.pi) - math.pi
 
 
-def turn_in_place(arlo, omega_cmd: float, seconds: float):
-    """Command a pure rotation (approx), non-blocking updates every DT."""
-    steps = int(max(1, seconds * LOOP_HZ))
-    for _ in range(steps):
-        arlo.drive(0, 0)  # ensure neutral
-        # Your robot API likely has "turn" time-based; we emulate with short pulses
-        if omega_cmd >= 0:
-            arlo.turn(5)         # small left pulse
-        else:
-            arlo.turn(-5)        # small right pulse
-        time.sleep(DT)
-
-
-def go_straight(arlo, seconds: float):
-    """Command a straight drive via small pulses."""
-    steps = int(max(1, seconds * LOOP_HZ))
-    for _ in range(steps):
-        arlo.drive(20, 20)   # gentle forward (tweak if you have helpers for meters)
-        time.sleep(DT)
-
-
-def commanded_predict(particles, v, omega, dt):
-    """PF prediction using commanded motion."""
-    predict(particles, v=v, omega=omega, dt=dt,
+def commanded_predict_turn(particles: np.ndarray, arlo: CalibratedRobot, angle_deg: float, speed: int):
+    """
+    Perform PF prediction for a calibrated turn by 'angle_deg' at given 'speed'.
+    We model the motion as zero-translation, pure rotation over its calibrated duration.
+    """
+    angle_rad = math.radians(angle_deg)
+    # Calibrated duration formula from your CalibratedRobot.turn_angle():
+    # duration = TURN_TIME * (abs(angleDeg)/90) * (default_speed/current_speed)
+    duration = arlo.TURN_TIME * (abs(angle_deg) / 90.0) * (arlo.default_speed / float(speed))
+    # For prediction we can step once with omega = angle/duration (rad/s)
+    omega = (angle_rad / duration) if duration > 1e-6 else 0.0
+    predict(particles, v=0.0, omega=omega, dt=duration,
             sigma_trans=SIGMA_TRANS, sigma_rot=SIGMA_ROT)
 
 
-# ---------------------- main phases ------------------------------------------
-def phase_scan_until_seen_both(arlo, cam, particles, spin_dir:+int = +1):
+def commanded_predict_drive(particles: np.ndarray, arlo: CalibratedRobot, meters: float, speed: int):
     """
-    Physically spin in place while updating PF until both landmark IDs are seen.
-    spin_dir: +1 = left (CCW), -1 = right (CW)
+    PF prediction for a calibrated straight drive by 'meters' at given 'speed'.
     """
-    print("[SCAN] Starting spin to see both landmarks ...")
+    # Calibrated duration formula from your CalibratedRobot.drive_distance():
+    # duration = TRANSLATION_TIME * meters * (default_speed/current_speed)
+    duration = arlo.TRANSLATION_TIME * meters * (arlo.default_speed / float(speed))
+    # v = distance / duration
+    v = (meters / duration) if duration > 1e-6 else 0.0
+    predict(particles, v=v, omega=0.0, dt=duration,
+            sigma_trans=SIGMA_TRANS, sigma_rot=SIGMA_ROT)
+
+
+def pf_update_in_place(particles: np.ndarray, cam: LandmarkCamera, steps: int = 5):
+    """
+    While robot is stopped, do a brief PF measurement update loop.
+    """
+    weights = np.ones(len(particles), dtype=np.float32) / len(particles)
+    for _ in range(steps):
+        # zero-motion predict just to keep time consistent
+        predict(particles, v=0.0, omega=0.0, dt=DT,
+                sigma_trans=SIGMA_TRANS, sigma_rot=SIGMA_ROT)
+        dets = cam.read()
+        weights = weight(particles, dets, LANDMARKS, SIGMA_R, SIGMA_B)
+        if effective_sample_size(weights) < 0.5 * len(particles):
+            particles[:] = resample_systematic(particles, weights, RECOVERY_FRAC, BOUNDS_XY, THETA_RANGE)
+            weights = np.ones(len(particles), dtype=np.float32) / len(particles)
+        time.sleep(DT)
+    return weights
+
+
+# ---------------------- phases ------------------------------------------------
+def phase_scan_until_seen_both(arlo: CalibratedRobot, cam: LandmarkCamera, particles: np.ndarray) -> bool:
+    """
+    Scan with small calibrated turns; after each turn, PF-predict for that turn,
+    then run one measurement update. Stop once both landmark IDs have been seen.
+    """
+    print("[SCAN] Starting calibrated scan...")
     seen = set()
-    last_report = time.time()
     start = time.time()
+    # We’ll sweep left in small increments
+    while time.time() - start < 60.0:
+        # 1) Turn a small step
+        arlo.turn_angle(+SCAN_STEP_DEG, speed=TURN_SPEED)
+        commanded_predict_turn(particles, arlo, +SCAN_STEP_DEG, speed=TURN_SPEED)
 
-    duty = 6 if spin_dir >= 0 else -6  # small, steady pulse
-    while time.time() - start < 60.0:  # cap scan phase at 60s
-        # 1) Command a tiny rotation pulse
-        try:
-            # If your robot.turn(duty) feels too weak on your floor, use the drive fallback:
-            # arlo.drive(25, -25)   # uncomment instead of arlo.turn(...)
-            arlo.turn(duty)
-        except Exception:
-            # Fallback if turn() is unavailable
-            arlo.drive(25, -25)
-
-        # 2) PF predict with a matching commanded angular velocity
-        commanded_predict(particles, v=0.0, omega=SCAN_OMEGA * spin_dir, dt=DT)
-
-        # 3) Camera update
+        # 2) Single measurement update after the turn
         dets = cam.read()
         for (lid, r, b) in dets:
             if lid in LANDMARKS:
                 seen.add(lid)
 
-        # 4) Weight / resample
         w = weight(particles, dets, LANDMARKS, SIGMA_R, SIGMA_B)
         ess = effective_sample_size(w)
         if ess < 0.5 * len(particles):
             particles[:] = resample_systematic(particles, w, RECOVERY_FRAC, BOUNDS_XY, THETA_RANGE)
             w = np.ones(len(particles), dtype=np.float32) / len(particles)
 
-        # 5) Progress print
-        now = time.time()
-        if now - last_report > 1.0:
-            est = estimate_pose(particles, w)
-            print(f"[SCAN] Seen IDs: {sorted(seen)} | ESS={ess:.1f} | est=({est[0]:.2f},{est[1]:.2f},{est[2]:.2f})")
-            last_report = now
+        est = estimate_pose(particles, w)
+        print(f"[SCAN] Seen={sorted(seen)} | ESS={ess:.1f} | est=({est[0]:.2f},{est[1]:.2f},{est[2]:.2f})")
 
-        # 6) Stop condition
-        if all(lid in seen for lid in LANDMARKS.keys()):
-            print("[SCAN] Both landmarks seen. Proceeding.")
+        if all(lid in seen for lid in LANDMARKS):
+            print("[SCAN] Both landmarks observed. Proceeding.")
+            arlo.stop()
             return True
 
-        time.sleep(DT)
-
     print("[SCAN] Timeout without seeing both landmarks.")
+    arlo.stop()
     return False
 
 
-
-def phase_drive_to_midpoint(arlo, cam, particles):
+def phase_drive_to_midpoint(arlo: CalibratedRobot, cam: LandmarkCamera, particles: np.ndarray) -> bool:
     """
-    Navigate to TARGET using short turn-go-turn segments with re-localization.
+    Navigate to TARGET: turn-to-goal then drive a short calibrated segment.
+    Re-localize; repeat until within DIST_TOL.
     """
     print(f"[DRIVE] Target (midpoint) = {TARGET}")
     t0 = time.time()
-    weights = np.ones(len(particles), dtype=np.float32) / len(particles)
 
     while time.time() - t0 < MAX_SECONDS:
-        # Refresh localization for a short window (stand still, take measurements)
-        for _ in range(int(0.5 * LOOP_HZ)):
-            commanded_predict(particles, v=0.0, omega=0.0, dt=DT)
-            weights = weight(particles, cam.read(), LANDMARKS, SIGMA_R, SIGMA_B)
-            if effective_sample_size(weights) < 0.5 * len(particles):
-                particles[:] = resample_systematic(particles, weights, RECOVERY_FRAC, BOUNDS_XY, THETA_RANGE)
-                weights = np.ones(len(particles), dtype=np.float32) / len(particles)
-            time.sleep(DT)
+        # Re-localize while stopped
+        weights = pf_update_in_place(particles, cam, steps=int(0.5 * LOOP_HZ))
 
+        # Current estimate
         x, y, th = estimate_pose(particles, weights)
         dx, dy = TARGET[0] - x, TARGET[1] - y
         dist = math.hypot(dx, dy)
         goal_heading = math.atan2(dy, dx)
         dth = angle_wrap(goal_heading - th)
-
         print(f"[DRIVE] pose=({x:.2f},{y:.2f},{th:.2f})  dist={dist:.2f}  dth={dth:.2f}")
 
         if dist <= DIST_TOL:
-            print("[DRIVE] Reached midpoint. Stopping.")
+            print("[DRIVE] Reached midpoint. ✅")
             arlo.stop()
             return True
 
-        # 1) Turn towards target (small steps, updating PF)
-        turn_sign = 1.0 if dth >= 0 else -1.0
-        turn_time = min(abs(dth) / max(TURN_SPEED, 1e-3), 1.2)  # cap to avoid long blind spins
-        steps = int(max(1, turn_time * LOOP_HZ))
-        for _ in range(steps):
-            # command a small rotation pulse
-            if turn_sign > 0:
-                arlo.turn(5)
-                omega_cmd = +TURN_SPEED
-            else:
-                arlo.turn(-5)
-                omega_cmd = -TURN_SPEED
+        # 1) Turn towards target (calibrated)
+        turn_deg = math.degrees(dth)
+        # Limit single turn to keep updates frequent
+        turn_deg = max(-60.0, min(60.0, turn_deg))
+        if abs(turn_deg) > 2.0:
+            arlo.turn_angle(turn_deg, speed=TURN_SPEED)
+            commanded_predict_turn(particles, arlo, turn_deg, speed=TURN_SPEED)
+            # Quick measurement after turning
+            _ = pf_update_in_place(particles, cam, steps=2)
 
-            # PF update while turning
-            commanded_predict(particles, v=0.0, omega=omega_cmd, dt=DT)
-            weights = weight(particles, cam.read(), LANDMARKS, SIGMA_R, SIGMA_B)
-            if effective_sample_size(weights) < 0.5 * len(particles):
-                particles[:] = resample_systematic(particles, weights, RECOVERY_FRAC, BOUNDS_XY, THETA_RANGE)
-                weights = np.ones(len(particles), dtype=np.float32) / len(particles)
-            time.sleep(DT)
+        # 2) Drive a short, calibrated forward segment
+        step_m = min(dist, DRIVE_STEP_M)
+        if step_m > 0.03:
+            arlo.drive_distance(step_m, direction=arlo.FORWARD, speed=DRIVE_SPEED)
+            commanded_predict_drive(particles, arlo, step_m, speed=DRIVE_SPEED)
+            # Quick measurement after driving
+            _ = pf_update_in_place(particles, cam, steps=2)
 
-        # 2) Drive a short straight segment (SEG_LEN), re-localizing as we move
-        seg_time = SEG_LEN / max(FWD_SPEED, 1e-3)
-        steps = int(max(1, seg_time * LOOP_HZ))
-        for _ in range(steps):
-            arlo.drive(20, 20)         # gentle forward pulse
-            commanded_predict(particles, v=FWD_SPEED, omega=0.0, dt=DT)
-            weights = weight(particles, cam.read(), LANDMARKS, SIGMA_R, SIGMA_B)
-            if effective_sample_size(weights) < 0.5 * len(particles):
-                particles[:] = resample_systematic(particles, weights, RECOVERY_FRAC, BOUNDS_XY, THETA_RANGE)
-                weights = np.ones(len(particles), dtype=np.float32) / len(particles)
-            time.sleep(DT)
-
-    print("[DRIVE] Gave up (timeout).")
+    print("[DRIVE] Timeout. ❌")
     arlo.stop()
     return False
 
 
 # ---------------------- main --------------------------------------------------
 def main():
-    print("[MAIN] Starting self-localization (Noah edition).")
+    print("[MAIN] Starting self-localization (Noah + CalibratedRobot).")
     # Robot
-    arlo = robot_mod.Robot()
+    arlo = CalibratedRobot()
     # Camera
-    cam = LandmarkCamera(use_mock=False)  # set True to test on laptop
+    cam = LandmarkCamera(use_mock=False)  # set True for offline testing
     cam.open()
 
     # Particles
     particles = init_particles(N_PARTICLES, BOUNDS_XY, THETA_RANGE)
 
     try:
-        ok = phase_scan_until_seen_both(arlo, cam, particles)
-        if not ok:
+        if not phase_scan_until_seen_both(arlo, cam, particles):
             print("[MAIN] Could not see both landmarks. Exiting.")
             return
 
         ok = phase_drive_to_midpoint(arlo, cam, particles)
-        if ok:
-            print("[MAIN] Done. ✅")
-        else:
-            print("[MAIN] Not reached target. ❌")
+        print("[MAIN] Done. ✅" if ok else "[MAIN] Not reached target. ❌")
     finally:
         cam.close()
         try:
