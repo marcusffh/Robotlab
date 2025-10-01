@@ -1,6 +1,6 @@
 import cv2
 from self_localization import particle
-import camera
+from self_localization import camera
 import numpy as np
 import time
 from timeit import default_timer as timer
