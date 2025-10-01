@@ -110,7 +110,7 @@ def _angle_deg(a, b, c):
     """Heading change at b given three points (x,z)."""
     v1 = (b[0] - a[0], b[1] - a[1])
     v2 = (c[0] - b[0], c[1] - b[1])
-    a1 = math.degrees(math.atan2(v1[0], v1[1]))  # atan2(x,z) matches your frame
+    a1 = math.degrees(math.atan2(v1[0], v1[1]))
     a2 = math.degrees(math.atan2(v2[0], v2[1]))
     d = a2 - a1
     # wrap to [-180,180]

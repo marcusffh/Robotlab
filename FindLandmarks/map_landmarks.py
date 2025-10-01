@@ -7,11 +7,11 @@ import time
 from Exercise1.CalibratedRobot import CalibratedRobot  # adjust path if needed
 
 # --- From your setup / slides ---
-F_PIX = 1275.0          # focal length [pixels]
+F_PIX = 1360.1          # focal length [pixels]
 MARKER_LEN_M = 0.14     # 140 mm -> meters
 
 # -------- Camera setup via OpenCV --------
-RES_W, RES_H = 640, 480
+RES_W, RES_H = 1640, 1232
 # If V4L2 is needed explicitly, use: cv2.VideoCapture(0, cv2.CAP_V4L2)
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH,  RES_W)
