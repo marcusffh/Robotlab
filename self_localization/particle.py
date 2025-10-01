@@ -1,13 +1,20 @@
 import numpy as np
 import random_numbers as rn
 
+"""
+Please remember that each particle represents on hypothesis of where the robot could be
 
+"""
+
+
+
+#Given
 class Particle(object):
     """Data structure for storing particle information (state and weight)"""
     def __init__(self, x=0.0, y=0.0, theta=0.0, weight=0.0):
-        self.x = x
-        self.y = y
-        self.theta = np.mod(theta, 2.0*np.pi)
+        self.x = x #x coordinate
+        self.y = y #y coordinate
+        self.theta = np.mod(theta, 2.0*np.pi) # wraps angle into raidans  [0 , 2\pi]
         self.weight = weight
 
     def getX(self):
@@ -35,6 +42,7 @@ class Particle(object):
         self.weight = val
 
 
+#Given
 def estimate_pose(particles_list):
     """Estimate the pose from particles by computing the average position and orientation over all particles. 
     This is not done using the particle weights, but just the sample distribution."""
@@ -61,15 +69,19 @@ def estimate_pose(particles_list):
         
     return Particle(x, y, theta)
      
-     
+
+## This is the only function that we were to impliment
 def move_particle(particle, delta_x, delta_y, delta_theta):
-    particle.x += + delta_x
+    """Move the particle by (delta_x, delta_y, delta_theta)
+    Warning: we are assuming that delta_x and delta_y are given
+    in world coordinates, this will not work if they are given in robot coordinates.
+    """
+    particle.x += delta_x
     particle.y += delta_y
-    new_theta += delta_theta
-
-    particle.theta = np.mod(new_theta, 2.0 * np.pi)
+    particle.theta = np.mod(particle.theta + delta_theta, 2.0 * np.pi)
 
 
+#Given
 def add_uncertainty(particles_list, sigma, sigma_theta):
     """Add some noise to each particle in the list. Sigma and sigma_theta is the noise
     variances for position and angle noise."""
@@ -79,6 +91,7 @@ def add_uncertainty(particles_list, sigma, sigma_theta):
         particle.theta = np.mod(particle.theta + rn.randn(0.0, sigma_theta), 2.0 * np.pi) 
 
 
+#Given, but we probaly wont use it...
 def add_uncertainty_von_mises(particles_list, sigma, theta_kappa):
     """Add some noise to each particle in the list. Sigma and theta_kappa is the noise
     variances for position and angle noise."""
