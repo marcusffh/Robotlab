@@ -3,7 +3,7 @@ import numpy as np
 import time
 import sys
 import threading
-import framebuffer
+from self_localization.framebuffer import framebuffer
 
 
 gstreamerCameraFound = False
