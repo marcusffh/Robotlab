@@ -76,8 +76,15 @@ try:
 except Exception:
     raise RuntimeError("cv2.aruco not found. Install opencv-contrib-python (or -headless).")
 
+# Dictionary works across versions
 ARUCO_DICT = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
-ARUCO_PARAMS = aruco.DetectorParameters_create()
+
+# Parameters: old API uses .DetectorParameters_create(), newer uses class ctor
+try:
+    ARUCO_PARAMS = aruco.DetectorParameters_create()   # OpenCV <= 4.6-ish
+except AttributeError:
+    ARUCO_PARAMS = aruco.DetectorParameters()          # OpenCV >= 4.7 new-style
+
 
 # --------------- Capture thread ---------------
 class CaptureThread(threading.Thread):
@@ -345,7 +352,13 @@ class Camera(object):
         Distance/bearing computed from cv2.aruco pose estimation using camera intrinsics.
         """
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        self.aruco_corners, self.ids, _rej = aruco.detectMarkers(gray, self.arucoDict, parameters=self.arucoParams)
+        if hasattr(aruco, "ArucoDetector"):
+            detector = aruco.ArucoDetector(self.arucoDict, self.arucoParams)
+            self.aruco_corners, self.ids, _rej = detector.detectMarkers(gray)
+        else:
+            self.aruco_corners, self.ids, _rej = aruco.detectMarkers(
+                gray, self.arucoDict, parameters=self.arucoParams
+    )
 
         self.rvecs, self.tvecs = None, None
         if self.ids is None or len(self.aruco_corners) == 0:
