@@ -1,5 +1,5 @@
 import numpy as np
-from self_localization import random_numbers as rn
+from self_localization.random_numbers import random_numbers as rn
 
 
 class Particle(object):
