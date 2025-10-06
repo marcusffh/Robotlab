@@ -30,7 +30,7 @@ except ImportError:
     USE_PICAM2 = False
 
 # --- Arlo robot API ----------------------------------------------------------
-import robot  # your provided API (go_diff, stop, sonar, etc.)
+from Robotutils.robot import robot  # your provided API (go_diff, stop, sonar, etc.)
 # Robot doc/API reference: see robot.py. :contentReference[oaicite:0]{index=0}
 
 # =============================================================================
@@ -38,8 +38,8 @@ import robot  # your provided API (go_diff, stop, sonar, etc.)
 # =============================================================================
 # Landmark IDs and world layout (Exercise 5 default: markers at (0,0) and (3.0, 0) meters)
 # Put the *printed* ArUco IDs here to bind them to the known 1D layout.
-MARKER_ID_LEFT  = 11   # TODO: set to your "left" box ID (as seen from the robot start area)
-MARKER_ID_RIGHT = 27   # TODO: set to your "right" box ID
+MARKER_ID_LEFT  = 6   # TODO: set to your "left" box ID (as seen from the robot start area)
+MARKER_ID_RIGHT = 7   # TODO: set to your "right" box ID
 LANDMARK_BASELINE_M = 3.00  # 3.0 m apart per handout (300 cm). :contentReference[oaicite:1]{index=1}
 
 # ArUco marker physical size (edge length of one square on the box)
