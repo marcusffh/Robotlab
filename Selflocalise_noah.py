@@ -30,7 +30,7 @@ except ImportError:
     USE_PICAM2 = False
 
 # --- Arlo robot API ----------------------------------------------------------
-from Robotutils.robot import robot  # your provided API (go_diff, stop, sonar, etc.)
+from Robotutils import robot  # your provided API (go_diff, stop, sonar, etc.)
 # Robot doc/API reference: see robot.py. :contentReference[oaicite:0]{index=0}
 
 # =============================================================================
