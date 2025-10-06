@@ -15,7 +15,7 @@ import cv2
 
 # ---------------- Project imports ----------------
 from Robotutils import robot as robot_mod
-from Robotutils import camera as ru_camera  # <- your camera module (with Camera class)
+from Robotutils import CameraDetection_util as ru_camera  # <- your camera module (with Camera class)
 
 # ---------------- Config ----------------
 MARKER_ID_LEFT  = 6
