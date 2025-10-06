@@ -106,22 +106,33 @@ def detect_aruco(frame):
     """Return list of ArucoObs for all detected markers (DICT_6X6_250)."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     ad = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
-    params = cv2.aruco.DetectorParameters()
-    detector = cv2.aruco.ArucoDetector(ad, params)
-    corners, ids, _ = detector.detectMarkers(gray)
+    params = cv2.aruco.DetectorParameters_create()  # compatible with both APIs
+
+    try:
+        # New API (OpenCV >= 4.7)
+        detector = cv2.aruco.ArucoDetector(ad, params)
+        corners, ids, _ = detector.detectMarkers(gray)
+    except AttributeError:
+        # Fallback to old API (OpenCV <= 4.6)
+        corners, ids, _ = cv2.aruco.detectMarkers(gray, ad, parameters=params)
+
     out = []
-    if ids is None: 
+    if ids is None:
         return out
+
     for i, c in enumerate(corners):
-        pts = c[0]  # (4,2): TL, TR, BR, BL
-        xs = pts[:,0]; ys = pts[:,1]
-        x = float(xs.mean()); y = float(ys.mean())
-        # pixel height = average of left/right edge lengths
+        pts = c[0]  # TL, TR, BR, BL
+        xs, ys = pts[:, 0], pts[:, 1]
+        x = float(xs.mean())
+        y = float(ys.mean())
+        # Pixel height = mean of left/right edge lengths
         left_h  = math.hypot(pts[3,0]-pts[0,0], pts[3,1]-pts[0,1])
         right_h = math.hypot(pts[2,0]-pts[1,0], pts[2,1]-pts[1,1])
-        h_px = 0.5*(left_h + right_h)
+        h_px = 0.5 * (left_h + right_h)
         out.append(ArucoObs(int(ids[i][0]), x, y, h_px))
+
     return out
+
 
 def obs_to_distance_bearing(obs: ArucoObs):
     """Pinhole projection: Z = f * H / h_px; bearing ≈ atan((x-cx)/fx)."""
