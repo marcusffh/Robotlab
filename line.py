@@ -1,5 +1,5 @@
 import time
-from Robotlab.Robotutils import robot
+from Robotutils import robot
 
 arlo = robot.Robot()
 
