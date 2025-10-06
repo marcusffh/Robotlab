@@ -143,14 +143,21 @@ def obs_to_distance_bearing(obs: ArucoObs):
     return d_m, bearing_rad
 
 def go_spin(arlo, radians):
-    """Positive = left (CCW), negative = right (CW). Time-based."""
-    if radians == 0.0: 
+    """Spin robot in place by a given angle (radians).
+       Positive = left (CCW), negative = right (CW).
+       Includes a short pause after spin to avoid motion blur.
+    """
+    if radians == 0.0:
         return
+
     sec = abs(radians) * TURN_SEC_PER_RAD
-    left_dir, right_dir = (0,1) if radians < 0 else (1,0)  # CW vs CCW
+    # Arlo go_diff(dirL, dirR): 1=forward,0=backward; for spin use opposite dirs
+    left_dir, right_dir = (0,1) if radians < 0 else (1,0)  # CW if negative
     arlo.go_diff(TURN_POWER, TURN_POWER, left_dir, right_dir)
     time.sleep(sec)
-    arlo.stop(); time.sleep(0.05)
+    arlo.stop()
+    # ---- new pause to let vibration settle before next camera frame ----
+    time.sleep(0.2)
 
 def go_forward(arlo, meters):
     if meters == 0.0: 
