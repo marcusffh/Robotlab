@@ -4,7 +4,7 @@ from Robotutils import robot
 arlo = robot.Robot()
 
 # ---- per-robot calibration (measure once, tweak here) ----
-CAL_KL = 1.000   # left wheel scale
+CAL_KL = 0.990   # left wheel scale
 CAL_KR = 1.000   # right wheel scale (e.g., 0.985 means right is a bit “strong”)
 MIN_PWR = 40     # per robot.py: avoid <40 except 0; valid 30..127, recommended ≥40
 MAX_PWR = 127
