@@ -67,6 +67,7 @@ def main():
         while time.time() - t0 < timeout_s:
             # Rotate left a bit
             bot.turn_angle(+ANGLE_STEP_DEG)
+            time.sleep(0.25)
             # Check detections
             curr = detect_valid(cam)
             if curr:
