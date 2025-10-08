@@ -1,94 +1,106 @@
-# explore_landmarks.py
-from RobotUtils.CalibratedRobot import CalibratedRobot
-import camera
+# LocalizationPathing.py  (drop-in)
 import time
-import numpy as np
 import math
+import numpy as np
 
 class LocalizationPathing:
-    def __init__(self, robot, camera, required_landmarks, step_cm=20, rotation_deg=20):
+    """
+    Minimal + fast:
+      - Explore until each required landmark ID has been seen at least once.
+      - Then: rotate toward midpoint and drive in chunky steps.
+
+    TURN SIGN: We assume robot.turn_angle(+deg) turns LEFT/CCW.
+               So we send the SAME SIGN as the math heading error.
+    """
+
+    def __init__(self, robot, camera, required_landmarks, step_cm=30, rotation_deg=15):
         self.robot = robot
         self.camera = camera
         self.required_landmarks = set(required_landmarks)
-        self.step_cm = step_cm
-        self.rotation_deg = rotation_deg
+        self.step_cm = float(step_cm)
+        self.rotation_deg = float(rotation_deg)
 
         self.observed_landmarks = set()
         self.all_seen = False
 
-        # small, safe alignment deadband (don’t drive until roughly facing goal)
-        self.align_deadband_rad = math.radians(5.0)
+        # Tiny alignment deadband so we don't waste time micro-turning
+        self.align_deadband_rad = math.radians(3.0)
 
+    # --------------------------- Exploration ---------------------------
     def explore_step(self, drive=False, min_dist=400):
+        """
+        Quick scan/step to see tags. Returns (distance_cm, angle_rad_math).
+        We keep this short so it doesn't 'think' forever.
+        """
         dist = 0.0
-        angle_deg = float(self.rotation_deg)
-
-        # IMPORTANT: robot +deg = CW (right) -> math angle is NEGATIVE radians
-        angle_rad = -math.radians(angle_deg)
+        angle_deg = self.rotation_deg
 
         if self.all_seen:
             return 0.0, 0.0
 
         if not drive:
-            self.robot.turn_angle(angle_deg)       # CW
-            time.sleep(0.2)
+            # Quick small left/CCW nudge
+            self.robot.turn_angle(angle_deg)
+            angle_rad = math.radians(angle_deg)   # SAME SIGN as command
+            # no long sleeps; camera read happens below
         else:
-            dist = float(self.step_cm)
+            dist = self.step_cm
             left, center, right = self.robot.proximity_check()
-
             if left < min_dist or center < min_dist or right < min_dist:
                 self.robot.stop()
 
+            # Quick bias away from closer side
             if left > right:
-                self.robot.turn_angle(45)          # CW
-                angle_rad = -math.radians(45)      # math negative
+                self.robot.turn_angle(+20)         # small, quick
+                angle_rad = math.radians(+20)
             else:
-                self.robot.turn_angle(-45)         # CCW
-                angle_rad = +math.radians(45)      # math positive
+                self.robot.turn_angle(-20)
+                angle_rad = math.radians(-20)
 
             self.robot.drive_distance_cm(dist)
 
-        # Update observed landmarks
+        # Check for tags after the motion
         frame = self.camera.get_next_frame()
         objectIDs, dists, angles = self.camera.detect_aruco_objects(frame)
         if objectIDs is not None:
             self.observed_landmarks.update(objectIDs)
-
         self.all_seen = self.required_landmarks.issubset(self.observed_landmarks)
-        return dist, angle_rad
+
+        return dist, angle_rad if 'angle_rad' in locals() else 0.0
 
     def seen_all_landmarks(self):
-        """Returns True if all required landmarks have been observed."""
         return self.all_seen
 
-    def move_towards_goal_step(self, est_pose, center, step_cm=10000):
-        robot_pos = np.array([est_pose.getX(), est_pose.getY()], dtype=float)
-        direction = np.array(center, dtype=float) - robot_pos
-        distance_to_center = float(np.linalg.norm(direction))
+    # ---------------------- Point-and-go to midpoint ----------------------
+    def move_towards_goal_step(self, est_pose, center, step_cm=None):
+        """
+        Rotate toward midpoint (same-sign command as math error), then drive.
+        Returns (distance_cm, angle_rad_applied).
+        """
+        if step_cm is None:
+            step_cm = self.step_cm
 
-        # compute math heading error (CCW positive), wrap to [-pi, pi]
-        angle_to_center = math.atan2(direction[1], direction[0]) - float(est_pose.getTheta())
-        angle_to_center = math.atan2(math.sin(angle_to_center), math.cos(angle_to_center))
+        # Pose and goal
+        rx, ry = float(est_pose.getX()), float(est_pose.getY())
+        rth    = float(est_pose.getTheta())
+        gx, gy = float(center[0]), float(center[1])
 
-        # close enough?
-        if distance_to_center < 5.0:
+        dx, dy = gx - rx, gy - ry
+        dist_to_goal = float(math.hypot(dx, dy))
+        if dist_to_goal < 5.0:
             print("reached center")
             return 0.0, 0.0
 
-        # FIRST: if notably misaligned, rotate only (don’t drive this tick)
+        # Math heading error (CCW +), wrap to [-pi, pi]
+        angle_to_center = math.atan2(dy, dx) - rth
+        angle_to_center = math.atan2(math.sin(angle_to_center), math.cos(angle_to_center))
+
+        # If notably misaligned, ROTATE FIRST, no negation:
         if abs(angle_to_center) > self.align_deadband_rad:
-            # KEY FIX: robot +deg = CW, so send the NEGATIVE of the math angle
-            self.robot.turn_angle(-math.degrees(angle_to_center))
-            # We applied 'angle_to_center' in math space
+            self.robot.turn_angle(math.degrees(angle_to_center))  # SAME SIGN
             return 0.0, angle_to_center
 
-        # THEN: drive forward (bounded by remaining distance)
-        move_distance = float(min(step_cm, distance_to_center))
-
-        print(f"distance moved: {move_distance:.1f} cm")
-        print(f"heading error (rad): {angle_to_center:.3f}")
-
+        # Then DRIVE in a decent chunk toward the goal
+        move_distance = float(min(step_cm, dist_to_goal))
         self.robot.drive_distance_cm(move_distance)
-
-        # We drove straight; rotation applied this tick is ~0
         return move_distance, 0.0
