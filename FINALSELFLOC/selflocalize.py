@@ -262,6 +262,7 @@ try:
         #cam = camera.Camera(0, robottype='arlo', useCaptureThread=True)
         cam = camera.Camera(1, robottype='arlo', useCaptureThread=False)
         pathing = LocalizationPathing(arlo, cam, landmarkIDs)
+        stabilization_counter = 0
     else:
         #cam = camera.Camera(0, robottype='macbookpro', useCaptureThread=True)
         cam = camera.Camera(0, robottype='macbookpro', useCaptureThread=False)
