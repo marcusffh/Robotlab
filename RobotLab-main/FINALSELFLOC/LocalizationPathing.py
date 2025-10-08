@@ -1,86 +1,126 @@
-# explore_landmarks.py
-from RobotUtils.CalibratedRobot import CalibratedRobot
-import camera
+# LocalizationPathing.py
 import time
+import math
 import numpy as np
 
-import time
-
 class LocalizationPathing:
-    def __init__(self, robot, camera, required_landmarks, step_cm=20, rotation_deg=20):
+    """
+    Explore until both required landmark IDs have been seen at least once,
+    then rotate toward the midpoint and drive there.
+
+    Key fix: unify math→robot turn mapping via _robot_turn_math().
+    Set robot_cw_positive=True if robot.turn_angle(+deg) turns RIGHT/CW (typical Arlo).
+    """
+
+    def __init__(self, robot, camera, required_landmarks, step_cm=20, rotation_deg=20, robot_cw_positive=True):
         self.robot = robot
         self.camera = camera
         self.required_landmarks = set(required_landmarks)
-        self.step_cm = step_cm
-        self.rotation_deg = rotation_deg
+        self.step_cm = float(step_cm)
+        self.rotation_deg = float(rotation_deg)
+        self.robot_cw_positive = bool(robot_cw_positive)
 
         self.observed_landmarks = set()
         self.all_seen = False
 
-    def explore_step(self, drive=False, min_dist = 400):
-        dist = 0
-        angle_deg = self.rotation_deg 
-        angle_rad = np.radians(angle_deg)
+        # Small helpers to keep things stable and fast
+        self.align_deadband_rad = math.radians(6.0)   # don't over-aim
+        self.max_turn_step_rad  = math.radians(12.0)  # cap per-loop rotation
+        self.nibble_cm          = 6.0                 # tiny forward step after turning (breaks spin-lock)
+
+    # --------- core mapping: math angle (CCW +) -> robot.turn_angle(...) ----------
+    def _robot_turn_math(self, angle_rad):
+        """
+        Rotate the robot by 'angle_rad' in math convention (CCW positive).
+        Handles robot API sign so we do the SAME physical rotation regardless of start side.
+        """
+        deg = math.degrees(angle_rad)
+        if abs(deg) < 1.0:
+            return
+        if self.robot_cw_positive:
+            # robot.turn_angle(+deg) = CW/right -> invert sign to get CCW math
+            self.robot.turn_angle(-deg)
+        else:
+            # robot.turn_angle(+deg) = CCW/left -> same sign as math
+            self.robot.turn_angle(+deg)
+
+    # ------------------------------------------------------------------------------
+
+    def explore_step(self, drive=False, min_dist=400):
+        """Quick spin/step to accumulate landmark IDs. Returns (distance_cm, angle_rad_applied_in_math)."""
+        dist = 0.0
+        angle_applied = 0.0
 
         if self.all_seen:
-            return 0, 0 
+            return 0.0, 0.0
 
         if not drive:
-            self.robot.turn_angle(angle_deg)
-            time.sleep(0.2)
-
-        if drive:
+            # rotate by rotation_deg (in math: + means CCW)
+            angle_math = math.radians(self.rotation_deg)
+            self._robot_turn_math(angle_math)
+            angle_applied = angle_math
+            time.sleep(0.15)  # brief dwell so camera can see
+        else:
             dist = self.step_cm
             left, center, right = self.robot.proximity_check()
-
             if left < min_dist or center < min_dist or right < min_dist:
                 self.robot.stop()
+            # bias away from closer side
             if left > right:
-                self.robot.turn_angle(45)   
-                angle_rad = np.radians(45)
+                angle_math = math.radians(+20.0)   # CCW in math
             else:
-                self.robot.turn_angle(-45)
-                angle_rad = np.radians(-45)
-
+                angle_math = math.radians(-20.0)   # CW in math
+            self._robot_turn_math(angle_math)
+            angle_applied = angle_math
             self.robot.drive_distance_cm(dist)
 
+        # Update seen IDs
         frame = self.camera.get_next_frame()
-        objectIDs, dists, angles = self.camera.detect_aruco_objects(frame)
-        if objectIDs is not None:
-            self.observed_landmarks.update(objectIDs)
-
+        ids, dists, angs = self.camera.detect_aruco_objects(frame)
+        if ids is not None:
+            self.observed_landmarks.update(ids)
         self.all_seen = self.required_landmarks.issubset(self.observed_landmarks)
 
-        return dist, angle_rad
-
+        return dist, angle_applied
 
     def seen_all_landmarks(self):
-        """
-        Returns True if all required landmarks have been observed.
-        """
         return self.all_seen
-    
-    def move_towards_goal_step(self, est_pose, center, step_cm=10000):
-        robot_pos = np.array([est_pose.getX(), est_pose.getY()])
-        direction = center - robot_pos
-        distance_to_center = np.linalg.norm(direction)
-        angle_to_center = np.arctan2(direction[1], direction[0]) - est_pose.getTheta()
 
-        if distance_to_center < 5:
+    def move_towards_goal_step(self, est_pose, center, step_cm=None):
+        """
+        Rotate a capped amount toward the midpoint (correct turn mapping),
+        then ALWAYS take a tiny forward nibble. Once aligned enough, take bigger steps.
+        Returns (distance_cm_commanded, angle_rad_applied_this_step_in_math).
+        """
+        if step_cm is None:
+            step_cm = self.step_cm
+
+        rx, ry = float(est_pose.getX()), float(est_pose.getY())
+        rth    = float(est_pose.getTheta())
+        gx, gy = float(center[0]), float(center[1])
+
+        dx, dy = gx - rx, gy - ry
+        dist_to_center = float(math.hypot(dx, dy))
+        if dist_to_center < 5.0:
             print("reached center")
-            return 0, 0
-        
-        angle_to_center = (angle_to_center + np.pi) % (2 * np.pi) - np.pi
-        
-        move_distance = min(step_cm, distance_to_center)
+            return 0.0, 0.0
 
-        print(f"distance moved: {move_distance}")
-        print(f"angle (rad) turned: {angle_to_center}")
+        # math heading error CCW-positive, normalized
+        ang_err = math.atan2(dy, dx) - rth
+        ang_err = math.atan2(math.sin(ang_err), math.cos(ang_err))
 
-        self.robot.turn_angle(np.degrees(angle_to_center))
+        # If misaligned, rotate only a capped amount
+        if abs(ang_err) > self.align_deadband_rad:
+            turn_step = max(-self.max_turn_step_rad, min(self.max_turn_step_rad, ang_err))
+            self._robot_turn_math(turn_step)
 
+            # Nibble forward anyway to break spin-lock and move geometry
+            move_distance = min(self.nibble_cm, max(0.0, dist_to_center - 2.0))
+            if move_distance > 0.0:
+                self.robot.drive_distance_cm(move_distance)
+            return move_distance, turn_step
+
+        # Aligned enough: take a bigger step toward goal
+        move_distance = float(min(step_cm, dist_to_center))
         self.robot.drive_distance_cm(move_distance)
-
-        return move_distance, angle_to_center
-
-
+        return move_distance, 0.0
