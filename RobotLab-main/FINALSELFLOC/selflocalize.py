@@ -15,8 +15,8 @@ import cv2
 from LandmarkOccupancyGrid import LandmarkOccupancyGrid
 
 # Flags
-showGUI = False
-onRobot = True
+showGUI = False  # GUI optional
+onRobot = True   # running on Arlo
 
 def isRunningOnArlo():
     return onRobot
@@ -34,9 +34,7 @@ CRED=(0,0,255); CGREEN=(0,255,0); CMAGENTA=(255,0,255); CWHITE=(255,255,255)
 landmarkIDs = [6, 7]
 landmarks = {6:(0.0,0.0), 7:(300.0,0.0)}
 center = np.array([(landmarks[6][0]+landmarks[7][0])/2,
-                   (landmarks[6][1]+landmarks[7][1])/2])
-
-landmark_colors = [CRED, CGREEN]
+                   (landmarks[6][1]+landmarks[7][1])/2])  # -> (150, 0)
 
 def jet(x):
     r=(x>=3/8 and x<5/8)*(4*x-1.5)+(x>=5/8 and x<7/8)+(x>=7/8)*(-4*x+4.5)
@@ -54,10 +52,10 @@ def draw_world(est_pose, particles, world):
         b=(int(p.getX()+15.0*np.cos(p.getTheta()))+offsetX,
            ymax-(int(p.getY()+15.0*np.sin(p.getTheta()))+offsetY))
         cv2.line(world,(x,y),b,colour,2)
-    for ID,col in zip(landmarkIDs,landmark_colors):
+    for ID,col in zip(landmarkIDs,[CRED, CGREEN]):
         lm=(int(landmarks[ID][0]+offsetX), int(ymax-(landmarks[ID][1]+offsetY)))
         cv2.circle(world,lm,5,col,2)
-    a=(int(est_pose.getX())+offsetX, ymax-(int(est_pose.getY())+offsetY))
+    a=(int(est_pose.getX())+offsetX, ymax-(int(est_pose.getY()+offsetY)))
     b=(int(est_pose.getX()+15.0*np.cos(est_pose.getTheta()))+offsetX,
        ymax-(int(est_pose.getY()+15.0*np.sin(est_pose.getTheta()))+offsetY))
     cv2.circle(world,a,5,CMAGENTA,2); cv2.line(world,a,b,CMAGENTA,2)
@@ -107,7 +105,10 @@ def filter_landmarks_by_distance(objectIDs,dists,angles):
     f_ids=list(md.keys()); f_d=[md[ID][0] for ID in f_ids]; f_a=[md[ID][1] for ID in f_ids]
     return f_ids,f_d,f_a
 
-# Main program
+# ---- robust 'are we at the midpoint?' check using PF pose ----
+CENTER_TOL_CM = 10.0
+GOAL_HITS_REQUIRED = 2
+
 try:
     if showGUI:
         cv2.namedWindow("Robot view"); cv2.moveWindow("Robot view",50,50)
@@ -121,8 +122,8 @@ try:
     distance=0.0
     angle=0.0
 
-    sigma_d=10.0
-    sigma_theta=0.2
+    sigma_d=9.0
+    sigma_theta=0.15
 
     w_slow=0.0; w_fast=0.0
     alpha_slow=1.0; alpha_fast=1.0
@@ -136,24 +137,20 @@ try:
     print("Opening and initializing camera")
     if isRunningOnArlo():
         cam=camera.Camera(1, robottype='arlo', useCaptureThread=False)
-        # IMPORTANT: typical Arlo = True (turn_angle +deg is CW). If your kit is CCW, set False.
-        pathing=LocalizationPathing(arlo, cam, landmarkIDs, step_cm=20, rotation_deg=20, robot_cw_positive=True)
+        # IMPORTANT: typical Arlo kits: turn_angle(+deg) = CW/right -> True
+        pathing=LocalizationPathing(arlo, cam, landmarkIDs, step_cm=15.0, rotation_deg=18.0, robot_cw_positive=True)
         stabilization_counter=0
+        goal_hits=0
     else:
         cam=camera.Camera(0, robottype='macbookpro', useCaptureThread=False)
 
+    last_dist_to_center = None
+
     while True:
-        action=cv2.waitKey(10)
-        if action==ord('q'):
+        if cv2.waitKey(10)==ord('q'):
             break
 
-        if not isRunningOnArlo():
-            if action==ord('w'): distance=10.0
-            elif action==ord('x'): distance=-10.0
-            elif action==ord('a'): angle=0.2
-            elif action==ord('d'): angle=-0.2
-            else: distance=0.0; angle=0.0
-
+        # Behaviour policy
         if isRunningOnArlo():
             if not pathing.seen_all_landmarks():
                 drive = random.random() < (1/18)
@@ -163,10 +160,13 @@ try:
                     stabilization_counter += 1
                     distance, angle = 0.0, 0.0
                 else:
+                    # drive toward known world midpoint
                     distance, angle = pathing.move_towards_goal_step(est_pose, center)
 
+        # Update PF with commanded motion
         sample_motion_model(particles, distance, angle, sigma_d, sigma_theta)
 
+        # Perception
         colour=cam.get_next_frame()
         objectIDs, dists, angles = cam.detect_aruco_objects(colour)
         if not isinstance(objectIDs, type(None)):
@@ -194,6 +194,25 @@ try:
                 p.setWeight(1.0/num_particles)
 
         est_pose=particle.estimate_pose(particles)
+
+        # Stop when truly at midpoint (PF distance check with confirmation)
+        dx=float(center[0]-est_pose.getX())
+        dy=float(center[1]-est_pose.getY())
+        dist_to_center=float(math.hypot(dx,dy))
+
+        # simple overshoot protection: if getting worse, shrink step size
+        if last_dist_to_center is not None and dist_to_center > last_dist_to_center + 5.0:
+            # reduce step a bit if we overshot or diverged
+            pathing.step_cm = max(8.0, pathing.step_cm * 0.7)
+        last_dist_to_center = dist_to_center
+
+        if dist_to_center <= CENTER_TOL_CM:
+            goal_hits += 1
+            if goal_hits >= GOAL_HITS_REQUIRED:
+                print("[INFO] Reached midpoint. Stopping.")
+                break
+        else:
+            goal_hits = 0
 
         if showGUI:
             draw_world(est_pose, particles, world)

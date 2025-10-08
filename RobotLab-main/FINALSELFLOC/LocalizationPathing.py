@@ -6,13 +6,16 @@ import numpy as np
 class LocalizationPathing:
     """
     Explore until both required landmark IDs have been seen at least once,
-    then rotate toward the midpoint and drive there.
+    then rotate toward the midpoint (known world coord) and drive there.
 
-    Key fix: unify math→robot turn mapping via _robot_turn_math().
-    Set robot_cw_positive=True if robot.turn_angle(+deg) turns RIGHT/CW (typical Arlo).
+    CRITICAL FIX:
+      Use a single mapping from math angle (CCW +) to robot.turn_angle(...)
+      via _robot_turn_math(). If your robot.turn_angle(+deg) = CW, set
+      robot_cw_positive=True (typical Arlo). If it's CCW, set False.
     """
 
-    def __init__(self, robot, camera, required_landmarks, step_cm=20, rotation_deg=20, robot_cw_positive=True):
+    def __init__(self, robot, camera, required_landmarks,
+                 step_cm=15.0, rotation_deg=18.0, robot_cw_positive=True):
         self.robot = robot
         self.camera = camera
         self.required_landmarks = set(required_landmarks)
@@ -23,28 +26,28 @@ class LocalizationPathing:
         self.observed_landmarks = set()
         self.all_seen = False
 
-        # Small helpers to keep things stable and fast
+        # Tuning (small & safe)
         self.align_deadband_rad = math.radians(6.0)   # don't over-aim
         self.max_turn_step_rad  = math.radians(12.0)  # cap per-loop rotation
         self.nibble_cm          = 6.0                 # tiny forward step after turning (breaks spin-lock)
 
-    # --------- core mapping: math angle (CCW +) -> robot.turn_angle(...) ----------
+    # ---- unified mapping: math angle (CCW +) -> robot.turn_angle(...) ----
     def _robot_turn_math(self, angle_rad):
         """
         Rotate the robot by 'angle_rad' in math convention (CCW positive).
-        Handles robot API sign so we do the SAME physical rotation regardless of start side.
+        Handles robot API sign so physical rotation matches math.
         """
         deg = math.degrees(angle_rad)
         if abs(deg) < 1.0:
             return
         if self.robot_cw_positive:
-            # robot.turn_angle(+deg) = CW/right -> invert sign to get CCW math
+            # robot.turn_angle(+deg) = CW/right -> invert sign for CCW math
             self.robot.turn_angle(-deg)
         else:
             # robot.turn_angle(+deg) = CCW/left -> same sign as math
             self.robot.turn_angle(+deg)
 
-    # ------------------------------------------------------------------------------
+    # ----------------------------------------------------------------------
 
     def explore_step(self, drive=False, min_dist=400):
         """Quick spin/step to accumulate landmark IDs. Returns (distance_cm, angle_rad_applied_in_math)."""
@@ -59,7 +62,7 @@ class LocalizationPathing:
             angle_math = math.radians(self.rotation_deg)
             self._robot_turn_math(angle_math)
             angle_applied = angle_math
-            time.sleep(0.15)  # brief dwell so camera can see
+            time.sleep(0.12)  # brief dwell so camera can see
         else:
             dist = self.step_cm
             left, center, right = self.robot.proximity_check()
@@ -67,9 +70,9 @@ class LocalizationPathing:
                 self.robot.stop()
             # bias away from closer side
             if left > right:
-                angle_math = math.radians(+20.0)   # CCW in math
+                angle_math = math.radians(+18.0)   # CCW in math
             else:
-                angle_math = math.radians(-20.0)   # CW in math
+                angle_math = math.radians(-18.0)   # CW in math
             self._robot_turn_math(angle_math)
             angle_applied = angle_math
             self.robot.drive_distance_cm(dist)
@@ -88,7 +91,7 @@ class LocalizationPathing:
 
     def move_towards_goal_step(self, est_pose, center, step_cm=None):
         """
-        Rotate a capped amount toward the midpoint (correct turn mapping),
+        Rotate a capped amount toward the world midpoint (correct turn mapping),
         then ALWAYS take a tiny forward nibble. Once aligned enough, take bigger steps.
         Returns (distance_cm_commanded, angle_rad_applied_this_step_in_math).
         """
@@ -101,8 +104,7 @@ class LocalizationPathing:
 
         dx, dy = gx - rx, gy - ry
         dist_to_center = float(math.hypot(dx, dy))
-        if dist_to_center < 5.0:
-            print("reached center")
+        if dist_to_center < 12.0:  # slightly wider than final check in main
             return 0.0, 0.0
 
         # math heading error CCW-positive, normalized
@@ -114,7 +116,7 @@ class LocalizationPathing:
             turn_step = max(-self.max_turn_step_rad, min(self.max_turn_step_rad, ang_err))
             self._robot_turn_math(turn_step)
 
-            # Nibble forward anyway to break spin-lock and move geometry
+            # Nibble forward to break spin-lock and move geometry
             move_distance = min(self.nibble_cm, max(0.0, dist_to_center - 2.0))
             if move_distance > 0.0:
                 self.robot.drive_distance_cm(move_distance)
