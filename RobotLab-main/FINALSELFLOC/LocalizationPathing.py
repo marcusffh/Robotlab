@@ -5,27 +5,26 @@ import numpy as np
 
 class LocalizationPathing:
     """
-    Minimal pathing:
-      - Explore until each required landmark ID has been observed at least once.
-      - Then rotate gently toward midpoint and drive in capped steps.
-    Robot API: turn_angle(+deg) is CW (right). Math +rad is CCW (left).
+    Minimal, deterministic pathing:
+      - Explore (rotate/step) until each required landmark ID has been seen at least once.
+      - Then: rotate fully to face the midpoint and drive straight toward it.
+    
+    Sign convention:
+      - Robot API:  robot.turn_angle(+deg)  => RIGHT / CW
+      - Math space: +radians                => CCW (left)
+      => send -degrees(math_angle) to the robot to rotate CCW in math space.
     """
 
-    def __init__(self, robot, camera, required_landmarks, step_cm=20.0, rotation_deg=20.0):
+    def __init__(self, robot, camera, required_landmarks, step_cm=30.0, rotation_deg=25.0):
         self.robot = robot
         self.camera = camera
         self.required_landmarks = set(required_landmarks)
 
-        self.step_cm = float(step_cm)          # default forward step per call (cm)
+        self.step_cm = float(step_cm)          # forward chunk per call (cm)
         self.rotation_deg = float(rotation_deg)
 
         self.observed_landmarks = set()
         self.all_seen = False
-
-        # Small tunables
-        self.ALIGN_DEADBAND_RAD = math.radians(5.0)   # ignore tiny heading errors
-        self.MAX_TURN_STEP_RAD  = math.radians(15.0)  # cap per-call turn
-        self.MAX_STEP_FRACTION  = 0.6                 # never take >60% of remaining distance
 
     # ----------------------------- Exploration -----------------------------
     def explore_step(self, drive=False, min_dist=400):
@@ -40,11 +39,12 @@ class LocalizationPathing:
             return 0.0, 0.0
 
         if not drive:
-            # Robot +deg => CW; math angle = negative
+            # Rotate in place to scan (robot +deg => CW; math angle is negative of that).
             self.robot.turn_angle(self.rotation_deg)
             angle_rad_math = -math.radians(self.rotation_deg)
             time.sleep(0.2)
         else:
+            # Small forward step with a bias away from the closer side.
             dist_cm = float(self.step_cm)
             left, center, right = self.robot.proximity_check()
 
@@ -72,13 +72,14 @@ class LocalizationPathing:
     def seen_all_landmarks(self):
         return self.all_seen
 
-    # ------------------------- Go-to-midpoint step -------------------------
+    # --------------------- Point-and-go to midpoint step -------------------
     def move_towards_goal_step(self, est_pose, center, step_cm=None, center_tol_cm=10.0):
         """
-        Rotate gently toward the goal, then take a modest forward step.
-        Capped to prevent overshoot; never drives if already within tolerance.
+        1) Rotate FULLY to face the midpoint.
+        2) Drive straight toward it in chunks (step_cm).
+        Stops driving if already within center_tol_cm.
 
-        Returns: (distance_cm, angle_rad_math_applied)
+        Returns: (distance_cm_commanded, angle_rad_math_applied)
         """
         if step_cm is None:
             step_cm = self.step_cm
@@ -99,27 +100,18 @@ class LocalizationPathing:
         heading_error = math.atan2(dy, dx) - rth
         heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error))  # wrap [-pi, pi]
 
-        applied_turn_math = 0.0
-
-        # Rotate a small, capped amount if misaligned
-        if abs(heading_error) > self.ALIGN_DEADBAND_RAD:
-            turn_step_math = max(-self.MAX_TURN_STEP_RAD, min(self.MAX_TURN_STEP_RAD, heading_error))
-            turn_deg_cmd = -math.degrees(turn_step_math)  # robot +deg = CW
+        # --- FULL ROTATION to face the goal (one command) ---
+        turn_deg_cmd = -math.degrees(heading_error)     # robot +deg = CW, so negate
+        if abs(turn_deg_cmd) > 1.0:                     # ignore <1° jitter
             self.robot.turn_angle(turn_deg_cmd)
-            applied_turn_math = turn_step_math
+            applied_turn_math = heading_error
+        else:
+            applied_turn_math = 0.0
 
-            # Recompute remaining distance after the turn (no forward yet if you prefer strict rotate-then-drive)
-            # Here we still allow a small forward step to keep momentum.
-        
-        # Forward step: cap to both step_cm and a fraction of remaining distance
-        max_fractional = self.MAX_STEP_FRACTION * dist_to_goal
-        move_distance = min(step_cm, max_fractional, dist_to_goal)
-
-        # If the cap leaves a tiny remainder (< center tol), trim movement to stop inside tolerance
-        if dist_to_goal - move_distance < center_tol_cm:
-            move_distance = max(0.0, dist_to_goal - center_tol_cm)
-
+        # --- STRAIGHT DRIVE toward the goal in chunks ---
+        move_distance = float(min(step_cm, dist_to_goal))
         if move_distance > 0.0:
             self.robot.drive_distance_cm(move_distance)
 
-        return float(move_distance), float(applied_turn_math)
+        # Return commands in math convention
+        return move_distance, applied_turn_math
