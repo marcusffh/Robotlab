@@ -8,7 +8,7 @@ class LocalizationPathing:
     Minimal, deterministic pathing:
       - Explore (rotate/step) until each required landmark ID has been seen at least once.
       - Then: rotate fully to face the midpoint and drive straight toward it.
-    
+
     Sign convention:
       - Robot API:  robot.turn_angle(+deg)  => RIGHT / CW
       - Math space: +radians                => CCW (left)
@@ -26,6 +26,36 @@ class LocalizationPathing:
         self.observed_landmarks = set()
         self.all_seen = False
 
+        # Slow-rotation knobs (tune to taste)
+        self.spin_step_deg = 5.0      # per sub-turn while spinning
+        self.spin_dwell_s  = 0.08     # pause after each sub-turn
+        self.align_step_deg = 6.0     # per sub-turn during alignment after detection
+        self.align_dwell_s  = 0.06
+
+    # ----------------------- Slow turn helper -----------------------
+    def turn_angle_slow(self, total_deg, step_deg=5.0, dwell_s=0.08, sample_camera=False):
+        """
+        Execute a turn in small steps with brief dwells so the camera can catch tags.
+        Positive total_deg means CW (robot API), negative means CCW.
+        """
+        if abs(total_deg) < 1e-6:
+            return
+        sign = 1.0 if total_deg >= 0 else -1.0
+        step_deg = abs(step_deg)
+        remaining = abs(total_deg)
+
+        while remaining > 0.0:
+            d = min(step_deg, remaining) * sign
+            self.robot.turn_angle(d)
+            remaining -= abs(d)
+            time.sleep(dwell_s)
+            if sample_camera:
+                # “Peek” a frame so the calling code can detect tags more reliably
+                try:
+                    _ = self.camera.get_next_frame()
+                except Exception:
+                    pass
+
     # ----------------------------- Exploration -----------------------------
     def explore_step(self, drive=False, min_dist=400):
         """
@@ -39,10 +69,12 @@ class LocalizationPathing:
             return 0.0, 0.0
 
         if not drive:
-            # Rotate in place to scan (robot +deg => CW; math angle is negative of that).
-            self.robot.turn_angle(self.rotation_deg)
-            angle_rad_math = -math.radians(self.rotation_deg)
-            time.sleep(0.2)
+            # Slow spin: split rotation into small steps with dwells and camera samples
+            self.turn_angle_slow(self.rotation_deg,
+                                 step_deg=self.spin_step_deg,
+                                 dwell_s=self.spin_dwell_s,
+                                 sample_camera=True)
+            angle_rad_math = -math.radians(self.rotation_deg)  # robot CW = math negative
         else:
             # Small forward step with a bias away from the closer side.
             dist_cm = float(self.step_cm)
@@ -52,11 +84,19 @@ class LocalizationPathing:
                 self.robot.stop()
 
             if left > right:
-                self.robot.turn_angle(45)            # CW
-                angle_rad_math = -math.radians(45)   # math negative
+                # CW
+                self.turn_angle_slow(45,
+                                     step_deg=self.spin_step_deg,
+                                     dwell_s=self.spin_dwell_s,
+                                     sample_camera=True)
+                angle_rad_math = -math.radians(45)
             else:
-                self.robot.turn_angle(-45)           # CCW
-                angle_rad_math = +math.radians(45)   # math positive
+                # CCW
+                self.turn_angle_slow(-45,
+                                     step_deg=self.spin_step_deg,
+                                     dwell_s=self.spin_dwell_s,
+                                     sample_camera=True)
+                angle_rad_math = +math.radians(45)
 
             self.robot.drive_distance_cm(dist_cm)
 
@@ -75,7 +115,7 @@ class LocalizationPathing:
     # --------------------- Point-and-go to midpoint step -------------------
     def move_towards_goal_step(self, est_pose, center, step_cm=None, center_tol_cm=10.0):
         """
-        1) Rotate FULLY to face the midpoint.
+        1) Rotate to face the midpoint using slow, stepped turning.
         2) Drive straight toward it in chunks (step_cm).
         Stops driving if already within center_tol_cm.
 
@@ -100,18 +140,19 @@ class LocalizationPathing:
         heading_error = math.atan2(dy, dx) - rth
         heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error))  # wrap [-pi, pi]
 
-        # --- FULL ROTATION to face the goal (one command) ---
-        turn_deg_cmd = -math.degrees(heading_error)     # robot +deg = CW, so negate
-        if abs(turn_deg_cmd) > 1.0:                     # ignore <1° jitter
-            self.robot.turn_angle(turn_deg_cmd)
+        # Slow alignment turn: split into small degrees with brief dwells and camera sampling
+        turn_deg_cmd = -math.degrees(heading_error)  # robot +deg = CW
+        applied_turn_math = 0.0
+        if abs(turn_deg_cmd) > 1.0:  # ignore sub-degree jitter
+            self.turn_angle_slow(turn_deg_cmd,
+                                 step_deg=self.align_step_deg,
+                                 dwell_s=self.align_dwell_s,
+                                 sample_camera=True)
             applied_turn_math = heading_error
-        else:
-            applied_turn_math = 0.0
 
-        # --- STRAIGHT DRIVE toward the goal in chunks ---
+        # Straight drive toward the goal in chunks
         move_distance = float(min(step_cm, dist_to_goal))
         if move_distance > 0.0:
             self.robot.drive_distance_cm(move_distance)
 
-        # Return commands in math convention
         return move_distance, applied_turn_math
