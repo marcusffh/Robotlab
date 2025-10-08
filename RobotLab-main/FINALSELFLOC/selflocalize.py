@@ -200,9 +200,9 @@ try:
     distance = 0.0  # cm per step (commanded)
     angle = 0.0     # rad per step (commanded)
 
-    # --- Slightly tighter measurement noise (helps pick correct side) ---
+    # Slightly tighter measurement noise (helps pick correct side)
     sigma_d = 7.0        # distance noise [cm] in measurement model
-    sigma_theta = 0.12   # bearing noise [rad] (~7°) in measurement model & motion
+    sigma_theta = 0.12   # bearing noise [rad] (~7°) in measurement & motion
 
     # Adaptive resampling accumulators
     w_slow = 0.0
@@ -223,10 +223,7 @@ try:
         cam = camera.Camera(1, robottype='arlo', useCaptureThread=False)
         pathing = LocalizationPathing(arlo, cam, landmarkIDs)
         stabilization_counter = 0
-
-        # --- NEW: require both markers to be seen together a few times ---
-        both_visible_hits = 0
-        BOTH_VISIBLE_REQUIRED = 3
+        landmarks_acquired = False  # latch: seen IDs 6 & 7 at least once each
     else:
         cam = camera.Camera(0, robottype='macbookpro', useCaptureThread=False)
 
@@ -250,10 +247,18 @@ try:
 
         # Use motor controls to update particles
         if isRunningOnArlo():
-            if not pathing.seen_all_landmarks() or both_visible_hits < BOTH_VISIBLE_REQUIRED:
-                drive = random.random() < (1/18)
-                distance, angle = pathing.explore_step(drive)
+            if not landmarks_acquired:
+                # keep exploring until we've observed both IDs (not necessarily same frame)
+                if pathing.seen_all_landmarks():
+                    landmarks_acquired = True
+                    stabilization_counter = 0
+                    distance, angle = 0.0, 0.0
+                    print("[INFO] All landmarks seen at least once. Stabilizing...")
+                else:
+                    drive = random.random() < (1/18)
+                    distance, angle = pathing.explore_step(drive)
             else:
+                # short settle, then go to midpoint
                 if stabilization_counter < 2:
                     stabilization_counter += 1
                     distance, angle = 0.0, 0.0
@@ -270,13 +275,6 @@ try:
         objectIDs, dists, angles = cam.detect_aruco_objects(colour)
         if not isinstance(objectIDs, type(None)):
             objectIDs, dists, angles = filter_landmarks_by_distance(objectIDs, dists, angles)
-
-            # Track if both markers are seen together for a few frames
-            if isRunningOnArlo():
-                if (6 in objectIDs) and (7 in objectIDs):
-                    both_visible_hits += 1
-                else:
-                    both_visible_hits = 0
 
             # List detected objects
             for i in range(len(objectIDs)):

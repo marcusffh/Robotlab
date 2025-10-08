@@ -1,19 +1,18 @@
-# explore_landmarks.py
+# LocalizationPathing.py
 import time
 import math
 import numpy as np
 
 class LocalizationPathing:
     """
-    Minimal pathing helper for Exercise 5.
+    Pathing helper with minimal logic:
+      - Explore (rotate, occasional step) until each required landmark ID has
+        been observed at least once (not necessarily at the same time).
+      - Then, stabilize briefly and move toward the midpoint.
 
     Sign convention note:
       - Robot API:  robot.turn_angle(+deg)  => RIGHT (clockwise)
       - Math space: +radians                => CCW (left)
-
-    Therefore, when we want to rotate by +theta (math, CCW), we must send
-    -degrees to the robot API. We ALWAYS return math-radians (what the
-    particle filter expects).
     """
 
     def __init__(self, robot, camera, required_landmarks, step_cm=20.0, rotation_deg=20.0):
@@ -27,10 +26,11 @@ class LocalizationPathing:
         self.observed_landmarks = set()
         self.all_seen = False
 
-        # Tiny, local tunables (kept conservative)
+        # Tiny, local tunables
         self.ALIGN_DEADBAND_RAD = math.radians(5.0)   # ignore tiny heading errors
         self.MAX_TURN_STEP_RAD  = math.radians(15.0)  # cap per-call turn amount
         self.CENTER_TOL_CM      = 5.0                 # "reached" tolerance
+        self.MIN_NIBBLE_CM      = 2.0                 # ensures small forward motion
 
     # ----------------------------- Exploration -----------------------------
     def explore_step(self, drive=False, min_dist=400):
@@ -74,7 +74,7 @@ class LocalizationPathing:
 
             self.robot.drive_distance_cm(dist_cm)
 
-        # Update which landmarks we’ve seen
+        # Update which landmarks we’ve seen (we only need each at least once)
         frame = self.camera.get_next_frame()
         objectIDs, dists, angles = self.camera.detect_aruco_objects(frame)
         if objectIDs is not None:
@@ -128,10 +128,10 @@ class LocalizationPathing:
         else:
             applied_turn_math = 0.0
 
-        # Drive forward a modest step toward the goal (no fancy slowdown; keep it minimal)
+        # Drive forward a modest step toward the goal (ensure a tiny nibble)
         move_distance = float(min(step_cm, dist_to_goal))
-        if move_distance > 0.0:
-            self.robot.drive_distance_cm(move_distance)
+        move_distance = max(self.MIN_NIBBLE_CM, move_distance)
+        self.robot.drive_distance_cm(move_distance)
 
         # Return exactly what we commanded, in math convention
         return move_distance, applied_turn_math
