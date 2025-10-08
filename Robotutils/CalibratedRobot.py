@@ -29,6 +29,7 @@ class CalibratedRobot:
         r = self.clamp_power(rightSpeed * self.CAL_KR) if rightSpeed > 0 else 0
         self.arlo.go_diff(l, r, leftDir, rightDir)
 
+    # This is the main drive forward function for the robot
     def drive_distance(self, meters, direction=None, speed=None,):
         """Drive a certain amount of meters at a given speed."""
         if speed is None:
@@ -41,6 +42,7 @@ class CalibratedRobot:
         time.sleep(duration)
         self.arlo.stop()
 
+    #This is the main turn function for the robot
     def turn_angle(self, angleDeg, speed=None):
         """Turn a given angle in degrees at a given speed. Positive = left, negative = right."""
         if speed is None:

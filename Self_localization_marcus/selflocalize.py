@@ -5,6 +5,7 @@ import numpy as np
 import time
 from timeit import default_timer as timer
 import sys
+from Robotutils import CalibratedRobot
 
 
 # Flags
@@ -21,7 +22,7 @@ def isRunningOnArlo():
 
 if isRunningOnArlo():
     # XXX: You need to change this path to point to where your robot.py file is located
-    sys.path.append("../../../../Arlo/python")
+    sys.path.append("Robotlab/Robotutils/")
 
 
 try:
@@ -143,6 +144,12 @@ try:
     angular_velocity = 0.0 # radians/sec
 
     # Initialize the robot (XXX: You do this)
+    #---------------------------------------------------------------------------------------
+    if isRunningOnArlo():
+        arlo = CalibratedRobot()
+        print("Robot is initialized")
+    #---------------------------------------------------------------------------------------
+
 
     # Allocate space for world map
     world = np.zeros((500,500,3), dtype=np.uint8)
@@ -181,9 +188,24 @@ try:
 
 
         
-        # Use motor controls to update particles
+        # Use motor controls to update particles -- 1. PREDICTION STEP
         # XXX: Make the robot drive
-        # XXX: You do this
+        #----------------------------------------------------------
+
+        if isRunningOnArlo():
+            # 1. Move the real robot
+            arlo.turn_angle(angleDeg=15)
+
+            # 2. Move the particles (rotation only)
+            angle_rad = np.radians(15)
+            for p in particles:
+                p.setTheta(p.getTheta() + angle_rad)
+
+            # 3. Add some uncertainty (5° std. dev)
+            particle.add_uncertainty(particles, sigma=0.0, sigma_theta=0.05)
+
+#----------------------------------------------------------
+
 
 
         # Fetch next frame
