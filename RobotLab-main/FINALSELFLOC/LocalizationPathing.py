@@ -1,137 +1,94 @@
 # explore_landmarks.py
+from RobotUtils.CalibratedRobot import CalibratedRobot
+import camera
 import time
-import math
 import numpy as np
+import math
 
 class LocalizationPathing:
-    """
-    Minimal pathing helper for Exercise 5.
-
-    Sign convention note:
-      - Robot API:  robot.turn_angle(+deg)  => RIGHT (clockwise)
-      - Math space: +radians                => CCW (left)
-
-    Therefore, when we want to rotate by +theta (math, CCW), we must send
-    -degrees to the robot API. We ALWAYS return math-radians (what the
-    particle filter expects).
-    """
-
-    def __init__(self, robot, camera, required_landmarks, step_cm=20.0, rotation_deg=20.0):
+    def __init__(self, robot, camera, required_landmarks, step_cm=20, rotation_deg=20):
         self.robot = robot
         self.camera = camera
         self.required_landmarks = set(required_landmarks)
-
-        self.step_cm = float(step_cm)          # default forward step per call (cm)
-        self.rotation_deg = float(rotation_deg)
+        self.step_cm = step_cm
+        self.rotation_deg = rotation_deg
 
         self.observed_landmarks = set()
         self.all_seen = False
 
-        # Tiny, local tunables (kept conservative)
-        self.ALIGN_DEADBAND_RAD = math.radians(5.0)   # ignore tiny heading errors
-        self.MAX_TURN_STEP_RAD  = math.radians(15.0)  # cap per-call turn amount
-        self.CENTER_TOL_CM      = 5.0                 # "reached" tolerance
+        # small, safe alignment deadband (don’t drive until roughly facing goal)
+        self.align_deadband_rad = math.radians(5.0)
 
-    # ----------------------------- Exploration -----------------------------
     def explore_step(self, drive=False, min_dist=400):
-        """
-        Spin/step to find landmarks. Optionally drive forward while avoiding
-        obstacles via proximity sensors.
+        dist = 0.0
+        angle_deg = float(self.rotation_deg)
 
-        Returns:
-            (distance_cm, angle_rad_math)
-        where angle_rad_math is the heading change in mathematical convention
-        (CCW positive). Distance is forward movement in cm.
-        """
-        dist_cm = 0.0
-        angle_rad_math = 0.0
+        # IMPORTANT: robot +deg = CW (right) -> math angle is NEGATIVE radians
+        angle_rad = -math.radians(angle_deg)
 
         if self.all_seen:
             return 0.0, 0.0
 
         if not drive:
-            # Rotate in place to scan.
-            # Robot +deg => CW, so math angle is NEGATIVE of that.
-            self.robot.turn_angle(self.rotation_deg)
-            angle_rad_math = -math.radians(self.rotation_deg)
+            self.robot.turn_angle(angle_deg)       # CW
             time.sleep(0.2)
         else:
-            # Small forward step with a bias away from the closer side.
-            dist_cm = float(self.step_cm)
+            dist = float(self.step_cm)
             left, center, right = self.robot.proximity_check()
 
-            if (left < min_dist) or (center < min_dist) or (right < min_dist):
+            if left < min_dist or center < min_dist or right < min_dist:
                 self.robot.stop()
 
             if left > right:
-                # Turn robot to the RIGHT (positive degrees) => math negative
-                self.robot.turn_angle(45)
-                angle_rad_math = -math.radians(45)
+                self.robot.turn_angle(45)          # CW
+                angle_rad = -math.radians(45)      # math negative
             else:
-                # Turn robot to the LEFT (negative degrees) => math positive
-                self.robot.turn_angle(-45)
-                angle_rad_math = +math.radians(45)
+                self.robot.turn_angle(-45)         # CCW
+                angle_rad = +math.radians(45)      # math positive
 
-            self.robot.drive_distance_cm(dist_cm)
+            self.robot.drive_distance_cm(dist)
 
-        # Update which landmarks we’ve seen
+        # Update observed landmarks
         frame = self.camera.get_next_frame()
         objectIDs, dists, angles = self.camera.detect_aruco_objects(frame)
         if objectIDs is not None:
             self.observed_landmarks.update(objectIDs)
 
         self.all_seen = self.required_landmarks.issubset(self.observed_landmarks)
-        return dist_cm, angle_rad_math
+        return dist, angle_rad
 
     def seen_all_landmarks(self):
-        """True if all required landmarks have been observed at least once."""
+        """Returns True if all required landmarks have been observed."""
         return self.all_seen
 
-    # ------------------------- Go-to-midpoint step -------------------------
-    def move_towards_goal_step(self, est_pose, center, step_cm=None):
-        """
-        Rotate gently toward the goal, then take a modest forward step.
+    def move_towards_goal_step(self, est_pose, center, step_cm=10000):
+        robot_pos = np.array([est_pose.getX(), est_pose.getY()], dtype=float)
+        direction = np.array(center, dtype=float) - robot_pos
+        distance_to_center = float(np.linalg.norm(direction))
 
-        Returns:
-            (distance_cm, angle_rad_math_applied)
-        """
-        if step_cm is None:
-            step_cm = self.step_cm
+        # compute math heading error (CCW positive), wrap to [-pi, pi]
+        angle_to_center = math.atan2(direction[1], direction[0]) - float(est_pose.getTheta())
+        angle_to_center = math.atan2(math.sin(angle_to_center), math.cos(angle_to_center))
 
-        # Current pose (cm, rad) and goal (cm)
-        rx, ry = float(est_pose.getX()), float(est_pose.getY())
-        rth    = float(est_pose.getTheta())
-        gx, gy = float(center[0]), float(center[1])
-
-        dx, dy = gx - rx, gy - ry
-        dist_to_goal = float(math.hypot(dx, dy))
-
-        # Close enough? (no motion)
-        if dist_to_goal < self.CENTER_TOL_CM:
+        # close enough?
+        if distance_to_center < 5.0:
             print("reached center")
             return 0.0, 0.0
 
-        # Heading error in math convention (CCW positive)
-        heading_error = math.atan2(dy, dx) - rth
-        heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error))  # wrap [-pi, pi]
+        # FIRST: if notably misaligned, rotate only (don’t drive this tick)
+        if abs(angle_to_center) > self.align_deadband_rad:
+            # KEY FIX: robot +deg = CW, so send the NEGATIVE of the math angle
+            self.robot.turn_angle(-math.degrees(angle_to_center))
+            # We applied 'angle_to_center' in math space
+            return 0.0, angle_to_center
 
-        applied_turn_math = 0.0
+        # THEN: drive forward (bounded by remaining distance)
+        move_distance = float(min(step_cm, distance_to_center))
 
-        # If misaligned beyond deadband, rotate a small, capped amount first
-        if abs(heading_error) > self.ALIGN_DEADBAND_RAD:
-            # Choose a small turn toward reducing the error (in math space)
-            turn_step_math = max(-self.MAX_TURN_STEP_RAD, min(self.MAX_TURN_STEP_RAD, heading_error))
-            # Convert to robot degrees: robot +deg => CW => math negative
-            turn_deg_cmd = -math.degrees(turn_step_math)
-            self.robot.turn_angle(turn_deg_cmd)
-            applied_turn_math = turn_step_math
-        else:
-            applied_turn_math = 0.0
+        print(f"distance moved: {move_distance:.1f} cm")
+        print(f"heading error (rad): {angle_to_center:.3f}")
 
-        # Drive forward a modest step toward the goal (no fancy slowdown; keep it minimal)
-        move_distance = float(min(step_cm, dist_to_goal))
-        if move_distance > 0.0:
-            self.robot.drive_distance_cm(move_distance)
+        self.robot.drive_distance_cm(move_distance)
 
-        # Return exactly what we commanded, in math convention
-        return move_distance, applied_turn_math
+        # We drove straight; rotation applied this tick is ~0
+        return move_distance, 0.0
