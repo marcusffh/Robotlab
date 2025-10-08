@@ -14,10 +14,12 @@ class LocalizationPathing:
         self.observed_landmarks = set()
         self.all_seen = False
 
-        # keep it snappy but stable
-        self.align_deadband_rad = math.radians(4.0)   # no fine turning inside ~4°
-        self.max_turn_step_rad  = math.radians(15.0)  # never turn more than 15° per loop
+        # Tuning: prevent spin-lock and dithering
+        self.align_deadband_rad = math.radians(9.0)    # consider "aligned" within ~9°
+        self.max_turn_step_rad  = math.radians(10.0)   # cap turn per loop to ~10°
+        self.nibble_cm          = 8.0                  # small forward move after a turn
 
+    # ---------- Exploration (unchanged, but quick) ----------
     def explore_step(self, drive=False, min_dist=400):
         dist = 0.0
         angle_rad = 0.0
@@ -26,7 +28,7 @@ class LocalizationPathing:
             return 0.0, 0.0
 
         if not drive:
-            # Robot API: +deg = CW (right) -> math radians = NEGATIVE
+            # Arlo: +deg = CW (right) -> math radians are NEGATIVE
             self.robot.turn_angle(self.rotation_deg)
             angle_rad = -math.radians(self.rotation_deg)
         else:
@@ -42,7 +44,7 @@ class LocalizationPathing:
                 angle_rad = +math.radians(20)
             self.robot.drive_distance_cm(dist)
 
-        # Update which landmarks we’ve seen (accumulates across frames)
+        # Update which landmarks we've seen (accumulates)
         frame = self.camera.get_next_frame()
         objectIDs, dists, angles = self.camera.detect_aruco_objects(frame)
         if objectIDs is not None:
@@ -54,14 +56,16 @@ class LocalizationPathing:
     def seen_all_landmarks(self):
         return self.all_seen
 
+    # ---------- Go to midpoint with turn-then-nibble ----------
     def move_towards_goal_step(self, est_pose, center, step_cm=None):
         """
-        Rotate a bit (correct sign), then drive a chunk.
+        Rotate a bit (correct sign), then ALWAYS take a small forward 'nibble'.
+        Once roughly aligned, drive bigger chunks toward the midpoint.
+        Returns (distance_cm_commanded, angle_rad_applied_this_step).
         """
         if step_cm is None:
             step_cm = self.step_cm
 
-        # Pose and goal
         rx, ry = float(est_pose.getX()), float(est_pose.getY())
         rth    = float(est_pose.getTheta())
         gx, gy = float(center[0]), float(center[1])
@@ -76,14 +80,18 @@ class LocalizationPathing:
         angle_err = math.atan2(dy, dx) - rth
         angle_err = math.atan2(math.sin(angle_err), math.cos(angle_err))
 
-        # If misaligned, do a small, capped turn in the CORRECT direction for Arlo:
+        # If misaligned, turn a capped amount in the CORRECT direction for Arlo:
         # key: robot.turn_angle(+deg) is CW, so send -degrees(math_angle)
         if abs(angle_err) > self.align_deadband_rad:
             turn_step = max(-self.max_turn_step_rad, min(self.max_turn_step_rad, angle_err))
-            self.robot.turn_angle(-math.degrees(turn_step))   # <-- sign FIX
-            return 0.0, turn_step
+            self.robot.turn_angle(-math.degrees(turn_step))   # <-- sign fix
+            # Nibble forward anyway to break spin-lock
+            move_distance = min(self.nibble_cm, max(0.0, dist_to_center - 2.0))
+            if move_distance > 0.0:
+                self.robot.drive_distance_cm(move_distance)
+            return move_distance, turn_step
 
-        # Aligned enough — drive a chunk toward the midpoint
+        # If aligned enough, take a bigger step toward the goal
         move_distance = float(min(step_cm, dist_to_center))
         self.robot.drive_distance_cm(move_distance)
         return move_distance, 0.0
