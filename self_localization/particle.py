@@ -15,7 +15,7 @@ class Particle(object):
         self.x = x #x coordinate
         self.y = y #y coordinate
         self.theta = np.mod(theta, 2.0*np.pi) # wraps angle into raidans  [0 , 2\pi]
-        self.weight = weight
+        self.weight = weight ## How important is this particle
 
     def getX(self):
         return self.x
