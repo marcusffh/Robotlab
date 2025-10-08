@@ -291,6 +291,7 @@ try:
             if not pathing.seen_all_landmarks():
                 drive = random.random() < (1/18)
                 distance, angle = pathing.explore_step(drive)
+                stabilization_counter = 0
             else:
                 if stabilization_counter < 2:
                     stabilization_counter += 1
