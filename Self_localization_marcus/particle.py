@@ -247,4 +247,4 @@ def correction_step(particles, ids, dists, angles,LANDMARKS, sigma_d=10.0, sigma
 #I need to complete this resampling step
 #
 def resampling_step():
-    #
+    return
