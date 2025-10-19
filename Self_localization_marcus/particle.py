@@ -207,26 +207,49 @@ def correction_step(particles, ids, dists, angles,LANDMARKS, sigma_d=10.0, sigma
             
             landmark_pos = LANDMARKS[landmark_id]
             
-            # Compute the 
+
+            # -------------------------------
+            # Distance Part (Formula 2)
+            # -------------------------------
             #d^{(i)} = \sqrt{(l_x -x^{(i)})^2 + (l_y - y^{(i)})^2} essentially
             dx = landmark_pos[0] - particle.x #(l_x - x^(i))
             dy = landmark_pos[1] - particle.y #(l_y - y^(i))
-            expected_dist = np.sqrt(dx**2 + dy**2) #euclidean distance
+            euclidean_distance = np.sqrt(dx**2 + dy**2) #euclidean distance
+
+            #coefficient for Gaussian distance
+            coef_distance = 1 / (np.sqrt(2 * np.pi * sigma_d**2))
+
+            # Equation 2 from the pdf: distance probability
+            prob_dist = coef_distance * np.exp(- (dists[i] - euclidean_distance)**2 / ( 2 * sigma_d**2)) 
+
+
+
             
-            # Expected angle from particle to landmark (in robot frame)
-            angle_world = np.arctan2(dy, dx)
-            expected_angle = angle_world - particle.theta
-            # Normalize to [-pi, pi]
-            expected_angle = np.arctan2(np.sin(expected_angle), np.cos(expected_angle))
-            
-            # Gaussian probability for distance
-            prob_d = np.exp(-0.5 * ((dists[i] - expected_dist) / sigma_d)**2)
-            
-            # Gaussian probability for angle
-            prob_angle = np.exp(-0.5 * ((angles[i] - expected_angle) / sigma_theta)**2)
-            
-            # Multiply probabilities
-            weight *= prob_d * prob_angle
+            # -------------------------------
+            # Orientation Part (Formula 3)
+            # -------------------------------
+
+            #phi(i)
+            angle_world = np.arctan2(dy, dx)  # angle from particle to landmark in world frame
+            phi_i = angle_world - particle.theta  # expected orientation measurement, relative to robot's current position
+            phi_i = np.arctan2(np.sin(phi_i), np.cos(phi_i))  # wrap angle to [-pi, pi]
+
+            #phi_M
+            phi_M = angles[i]  # orientation measurement, relative to robot's current position
+
+            # difference between angles (wrapped [-pi , pi])
+            angle_diff = phi_M - phi_i
+            angle_diff = np.arctan2(np.sin(angle_diff), np.cos(angle_diff)) #wrap angle
+
+            #coefficient for Gaussian distance
+            coef_orientation = 1 / (np.sqrt(2 * np.pi * sigma_theta**2))
+        
+            #Prob dist using equation 3 from the pdf
+            prob_orientation = coef_orientation * np.exp(- (angle_diff)**2 / ( 2 * sigma_theta**2))
+
+            #calculate weight for this landmark observation
+            weight *= prob_dist * prob_orientation
+
         
         particle.weight = weight
     
@@ -248,3 +271,34 @@ def correction_step(particles, ids, dists, angles,LANDMARKS, sigma_d=10.0, sigma
 #
 def resampling_step():
     return
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"""
+
+            #wrap angle
+
+            # Expected angle from particle to landmark (in robot frame)
+            angle_world = np.arctan2(dy, dx)
+            expected_angle = angle_world - particle.theta
+            # Normalize to [-pi, pi]
+            expected_angle = np.arctan2(np.sin(expected_angle), np.cos(expected_angle))
+
+            # Gaussian probability for angle
+            prob_angle = np.exp(-0.5 * ((angles[i] - expected_angle) / sigma_theta)**2)
+            
+            # Multiply probabilities
+            weight *= prob_dist * prob_angle
+"""
