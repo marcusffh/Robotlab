@@ -5,7 +5,6 @@ import numpy as np
 import time
 from timeit import default_timer as timer
 import sys
-from Robotutils import CalibratedRobot
 
 
 # Flags
@@ -21,8 +20,7 @@ def isRunningOnArlo():
 
 
 if isRunningOnArlo():
-    # XXX: You need to change this path to point to where your robot.py file is located
-    sys.path.append("Robotlab/Robotutils/")
+    sys.path.append(r"\Robotlab\Robotutils")
 
 
 try:
@@ -54,7 +52,11 @@ landmarks = {
 }
 landmark_colors = [CRED, CGREEN] # Colors used when drawing the landmarks
 
-
+# Convert landmarks to numpy arrays for compatibility with particle filter
+LANDMARKS = {
+    1: np.array([0.0, 0.0]),
+    2: np.array([300.0, 0.0])
+}
 
 
 
@@ -144,12 +146,10 @@ try:
     angular_velocity = 0.0 # radians/sec
 
     # Initialize the robot (XXX: You do this)
-    #---------------------------------------------------------------------------------------
     if isRunningOnArlo():
-        arlo = CalibratedRobot()
-        print("Robot is initialized")
-    #---------------------------------------------------------------------------------------
-
+        r = robot.Robot()
+    else:
+        r = None
 
     # Allocate space for world map
     world = np.zeros((500,500,3), dtype=np.uint8)
@@ -164,6 +164,11 @@ try:
     else:
         #cam = camera.Camera(0, robottype='macbookpro', useCaptureThread=True)
         cam = camera.Camera(1, robottype='macbookpro', useCaptureThread=False)
+
+    # Track previous time and odometry for motion model
+    prev_time = timer()
+    prev_distance = 0.0
+    prev_angle = 0.0
 
     while True:
 
@@ -186,27 +191,29 @@ try:
                 angular_velocity -= 0.2
 
 
-
-        
-        # Use motor controls to update particles -- 1. PREDICTION STEP
-        # XXX: Make the robot drive
-        #----------------------------------------------------------
-
+        # Use motor controls to update particles
         if isRunningOnArlo():
-            # 1. Move the real robot
-            arlo.turn_angle(angleDeg=15)
+            # On robot: use odometry data
+            r.setVelocity(velocity, angular_velocity)
+            distance_traveled = r.getDistance()  # in cm
+            angle_turned = r.getAngle()  # in radians
+            delta_distance = distance_traveled - prev_distance
+            delta_angle = angle_turned - prev_angle
+            prev_distance = distance_traveled
+            prev_angle = angle_turned
+        else:
+            # Simulation mode: use elapsed time and velocities
+            current_time = timer()
+            elapsed_time = current_time - prev_time
+            prev_time = current_time
+            
+            delta_distance = velocity * elapsed_time  # cm
+            delta_angle = angular_velocity * elapsed_time  # radians
 
-            # 2. Move the particles (rotation only)
-            angle_rad = np.radians(15)
-            for p in particles:
-                p.setTheta(p.getTheta() + angle_rad)
 
-            # 3. Add some uncertainty (5° std. dev)
-            particle.add_uncertainty(particles, sigma=0.0, sigma_theta=0.05)
-
-#----------------------------------------------------------
-
-
+        # Update particle positions with motion model (prediction step)
+        particle.prediction_step(particles, delta_distance, delta_angle, 
+                                sigma_d=2.0, sigma_theta=0.05)
 
         # Fetch next frame
         colour = cam.get_next_frame()
@@ -219,11 +226,12 @@ try:
                 print("Object ID = ", objectIDs[i], ", Distance = ", dists[i], ", angle = ", angles[i])
                 # XXX: Do something for each detected object - remember, the same ID may appear several times
 
-            # Compute particle weights
-            # XXX: You do this
+            # Compute particle weights (correction step)
+            particle.correction_step(particles, objectIDs, dists, angles, LANDMARKS,
+                                    sigma_d=10.0, sigma_theta=np.deg2rad(10))
 
-            # Resampling
-            # XXX: You do this
+            # Resampling step
+            particles = particle.resampling_step(particles)
 
             # Draw detected objects
             cam.draw_aruco_objects(colour)

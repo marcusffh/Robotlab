@@ -265,40 +265,27 @@ def correction_step(particles, ids, dists, angles,LANDMARKS, sigma_d=10.0, sigma
 
 #------------------------------------------------------
 #The Resampling step
+def resampling_step(particles):
 
-## still missing
-#I need to complete this resampling step
-#
-def resampling_step():
-    return
+    N = len(particles) # How many particles are we resampling
+    if N == 0:     
+        return []
+    
+    #Get weights
+    w = np.array([p.weight for p in particles])
+    w = w / np.sum(w)
 
+    #Compute the cumulative distribution
+    H = np.cumsum(w)
 
+    # --- Resampling ---
+    resampled_particles = []
+    for _ in range(N):
+        z = rn.rand_uniform(0.0, 1.0)   # uniform [0,1)
+        i = np.searchsorted(H, z)
+        selected = particles[i]
+        # Copy selected particle into new set
+        new_p = Particle(selected.x, selected.y, selected.theta, 1.0 / N)
+        resampled_particles.append(new_p)
 
-
-
-
-
-
-
-
-
-
-
-
-
-"""
-
-            #wrap angle
-
-            # Expected angle from particle to landmark (in robot frame)
-            angle_world = np.arctan2(dy, dx)
-            expected_angle = angle_world - particle.theta
-            # Normalize to [-pi, pi]
-            expected_angle = np.arctan2(np.sin(expected_angle), np.cos(expected_angle))
-
-            # Gaussian probability for angle
-            prob_angle = np.exp(-0.5 * ((angles[i] - expected_angle) / sigma_theta)**2)
-            
-            # Multiply probabilities
-            weight *= prob_dist * prob_angle
-"""
+    return resampled_particles
