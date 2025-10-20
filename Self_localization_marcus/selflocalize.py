@@ -21,7 +21,7 @@ def isRunningOnArlo():
 
 if isRunningOnArlo():
     try:
-        from Robotutils import robot
+        from Robotutils.robot import robot
     except ImportError:
         print("robot_utils module not found")
         onRobot = False
