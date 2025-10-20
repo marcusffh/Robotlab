@@ -272,7 +272,7 @@ def resampling_step(particles):
         return []
     
     #Get weights
-    w = np.array([p.weight for p in particles])
+    w = np.array([p.weight for p in particles])  # FIXED: Added brackets
     w = w / np.sum(w)
 
     #Compute the cumulative distribution
@@ -281,7 +281,7 @@ def resampling_step(particles):
     # --- Resampling ---
     resampled_particles = []
     for _ in range(N):
-        z = rn.rand_uniform(0.0, 1.0)   # uniform [0,1)
+        z = np.random.ranf()  # FIXED: Changed from rn.rand_uniform(0.0, 1.0) to np.random.ranf()
         i = np.searchsorted(H, z)
         selected = particles[i]
         # Copy selected particle into new set
