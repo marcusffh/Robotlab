@@ -5,6 +5,7 @@ import numpy as np
 import time
 from timeit import default_timer as timer
 import sys
+from Robotutils.CalibratedRobot import CalibratedRobot 
 
 
 # Flags
@@ -43,10 +44,10 @@ CBLACK = (0, 0, 0)
 
 # Landmarks.
 # The robot knows the position of 2 landmarks. Their coordinates are in the unit centimeters [cm].
-landmarkIDs = [1, 2]
+landmarkIDs = [6, 7]
 landmarks = {
-    1: (0.0, 0.0),  # Coordinates for landmark 1
-    2: (300.0, 0.0)  # Coordinates for landmark 2
+    6: (0.0, 0.0),  # Coordinates for landmark 1
+    7: (300.0, 0.0)  # Coordinates for landmark 2
 }
 landmark_colors = [CRED, CGREEN] # Colors used when drawing the landmarks
 
@@ -136,18 +137,19 @@ try:
     # Initialize particles
     num_particles = 1000
     particles = initialize_particles(num_particles)
-
     est_pose = particle.estimate_pose(particles) # The estimate of the robots current pose
 
     # Driving parameters
     velocity = 0.0 # cm/sec
     angular_velocity = 0.0 # radians/sec
 
-    # Initialize the robot (XXX: You do this)
+    # Initialize the robot --------------------------------
     if isRunningOnArlo():
         r = robot.Robot()
+        cal_robot = CalibratedRobot()
     else:
         r = None
+    #---------------------------------------------------------------------
 
     # Allocate space for world map
     world = np.zeros((500,500,3), dtype=np.uint8)
@@ -163,10 +165,7 @@ try:
         #cam = camera.Camera(0, robottype='macbookpro', useCaptureThread=True)
         cam = camera.Camera(1, robottype='macbookpro', useCaptureThread=False)
 
-    # Track previous time and odometry for motion model
-    prev_time = timer()
-    prev_distance = 0.0
-    prev_angle = 0.0
+    objectIDs = None
 
     while True:
 
@@ -191,28 +190,52 @@ try:
 
         # Use motor controls to update particles
         if isRunningOnArlo():
-            # On robot: use odometry data
-            r.setVelocity(velocity, angular_velocity)
-            distance_traveled = r.getDistance()  # in cm
-            angle_turned = r.getAngle()  # in radians
-            delta_distance = distance_traveled - prev_distance
-            delta_angle = angle_turned - prev_angle
-            prev_distance = distance_traveled
-            prev_angle = angle_turned
-        else:
-            # Simulation mode: use elapsed time and velocities
-            current_time = timer()
-            elapsed_time = current_time - prev_time
-            prev_time = current_time
-            
-            delta_distance = velocity * elapsed_time  # cm
-            delta_angle = angular_velocity * elapsed_time  # radians
+            #The case where we havent seen both landmarks
+            if objectIDs is None or len(set(objectIDs)) < 2:
+                print("Searching landmarks")
+                cal_robot.turn_angle(10)
 
+                #update particle based on turn
+                distance_cm, angle_rad = particle.robot_command_to_motion(turn_degrees=10, drive_meters= 0.0)
+                particle.prediction_step(particles, distance_cm, angle_rad)
+            #Bot landmarks detected
+            else: 
+                print("both landmarks detected, moving to midpoint")
 
-        # Update particle positions with motion model (prediction step)
-        particle.prediction_step(particles, delta_distance, delta_angle, 
-                                sigma_d=2.0, sigma_theta=0.05)
+                # Compute target (midpoint between landmarks)
+                lm1, lm2 = LANDMARKS[1], LANDMARKS[2]
+                target_x = (lm1[0] + lm2[0]) / 2.0
+                target_y = (lm1[1] + lm2[1]) / 2.0
 
+                #estimate current pose
+                est_pose = particle.estimate_pose(particles)
+                dx = target_x - est_pose.getx()
+                dy = target_y - est_pose.gety()
+
+                #compute distance and heading to midpoint
+                distance = np.sqrt(dx**2 + dy**2)
+                desired_angle = np.arctan2(dy, dx)
+                angle_diff = desired_angle - est_pose.getTheta()
+                angle_diff = np.arctan2(np.sin(angle_diff), np.cos(angle_diff))
+                
+                #turn toward the midpoint
+                cal_robot.turn_angle(np.rad2deg(angle_diff))
+                _. angle_rad = particle.robot_command_to_motion(turn_degrees= np.rad2deg(angle_diff), drive_meters = 0.0)
+                particle.prediction_step(particles, 0.0, angle_rad)
+
+                #Drive to midpoint
+                cal_robot.drive(distance / 100.0)
+                distance_cm, _ = particle.robot_command_to_motion(turn_degrees= 0.0 , drive_meters= distance/100.0)
+                particle.prediction_step(particles, distance_cm, 0.0)
+
+                print("reached midpoint. terminating")
+                cal_robot.stop()
+                break
+
+          
+        # ===== END OF ROBOT MOVEMENT CODE =====
+
+      
         # Fetch next frame
         colour = cam.get_next_frame()
         
