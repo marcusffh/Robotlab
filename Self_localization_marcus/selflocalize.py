@@ -20,14 +20,12 @@ def isRunningOnArlo():
 
 
 if isRunningOnArlo():
-    sys.path.append(r"\Robotlab\Robotutils")
-
-
-try:
-    import robot
-    onRobot = True
-except ImportError:
-    print("selflocalize.py: robot module not present - forcing not running on Arlo!")
+    try:
+        from Robotutils import robot
+    except ImportError:
+        print("robot_utils module not found")
+        onRobot = False
+else:
     onRobot = False
 
 
