@@ -53,8 +53,8 @@ landmark_colors = [CRED, CGREEN] # Colors used when drawing the landmarks
 
 # Convert landmarks to numpy arrays for compatibility with particle filter
 LANDMARKS = {
-    1: np.array([0.0, 0.0]),
-    2: np.array([300.0, 0.0])
+    6: np.array([0.0, 0.0]),
+    7: np.array([300.0, 0.0])
 }
 
 
@@ -111,15 +111,6 @@ def draw_world(est_pose, particles, world):
 
 
 
-def initialize_particles(num_particles):
-    particles = []
-    for i in range(num_particles):
-        # Random starting points. 
-        p = particle.Particle(600.0*np.random.ranf() - 100.0, 600.0*np.random.ranf() - 250.0, np.mod(2.0*np.pi*np.random.ranf(), 2.0*np.pi), 1.0/num_particles)
-        particles.append(p)
-
-    return particles
-
 
 # Main program #
 try:
@@ -133,23 +124,21 @@ try:
         cv2.namedWindow(WIN_World)
         cv2.moveWindow(WIN_World, 500, 50)
 
-
     # Initialize particles
     num_particles = 1000
-    particles = initialize_particles(num_particles)
+    particles = particle.initialize_particles(num_particles)
     est_pose = particle.estimate_pose(particles) # The estimate of the robots current pose
 
     # Driving parameters
     velocity = 0.0 # cm/sec
     angular_velocity = 0.0 # radians/sec
 
-    # Initialize the robot --------------------------------
+    # Initialize the robot 
     if isRunningOnArlo():
         r = robot.Robot()
         cal_robot = CalibratedRobot()
     else:
         r = None
-    #---------------------------------------------------------------------
 
     # Allocate space for world map
     world = np.zeros((500,500,3), dtype=np.uint8)
@@ -166,7 +155,6 @@ try:
         cam = camera.Camera(1, robottype='macbookpro', useCaptureThread=False)
 
     objectIDs = None
-
     while True:
 
         # Move the robot according to user input (only for testing)
@@ -203,30 +191,36 @@ try:
                 print("both landmarks detected, moving to midpoint")
 
                 # Compute target (midpoint between landmarks)
-                lm1, lm2 = LANDMARKS[1], LANDMARKS[2]
+                lm1, lm2 = LANDMARKS[6], LANDMARKS[7]
                 target_x = (lm1[0] + lm2[0]) / 2.0
                 target_y = (lm1[1] + lm2[1]) / 2.0
 
                 #estimate current pose
                 est_pose = particle.estimate_pose(particles)
-                dx = target_x - est_pose.getx()
-                dy = target_y - est_pose.gety()
+                dx = target_x - est_pose.getX()
+                dy = target_y - est_pose.getY()
 
                 #compute distance and heading to midpoint
-                distance = np.sqrt(dx**2 + dy**2)
+                distance_cm = np.sqrt(dx**2 + dy**2)
                 desired_angle = np.arctan2(dy, dx)
                 angle_diff = desired_angle - est_pose.getTheta()
                 angle_diff = np.arctan2(np.sin(angle_diff), np.cos(angle_diff))
                 
-                #turn toward the midpoint
-                cal_robot.turn_angle(np.rad2deg(angle_diff))
-                _. angle_rad = particle.robot_command_to_motion(turn_degrees= np.rad2deg(angle_diff), drive_meters = 0.0)
+                #turn toward the 
+                turn_degrees = np.rad2deg(angle_diff)
+                cal_robot.turn_angle(turn_degrees)
+
+                #update particle for turn
+                d_cm, angle_rad = particle.robot_command_to_motion(turn_degrees= turn_degrees , drive_meters = 0.0)
                 particle.prediction_step(particles, 0.0, angle_rad)
 
                 #Drive to midpoint
-                cal_robot.drive(distance / 100.0)
-                distance_cm, _ = particle.robot_command_to_motion(turn_degrees= 0.0 , drive_meters= distance/100.0)
-                particle.prediction_step(particles, distance_cm, 0.0)
+                drive_meters = distance_cm /100
+                cal_robot.drive(drive_meters)
+
+                #update particles for drive
+                d_cm, angle_rad = particle.robot_command_to_motion(turn_degrees= 0.0 , drive_meters= drive_meters)
+                particle.prediction_step(particles, d_cm, angle_rad)
 
                 print("reached midpoint. terminating")
                 cal_robot.stop()
